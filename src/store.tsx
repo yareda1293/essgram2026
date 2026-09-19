@@ -12,7 +12,7 @@ import {
   getUserById as getUserByIdFromSeed,
 } from './data';
 import { generateId } from './utils';
-import { supabase } from './lib/supabase';
+import { supabase, isSupabaseConfigured } from './lib/supabase';
 
 type AuthStage = 'phone' | 'code' | 'profile' | 'authenticated';
 
@@ -190,6 +190,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (loadedRef.current) return;
     loadedRef.current = true;
+    if (!isSupabaseConfigured) return;
 
     (async () => {
       try {
@@ -203,6 +204,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
           { data: dbCalls },
           { data: dbNotifications },
           { data: dbSettings },
+          { data: dbChannelPosts },
+          { data: dbChannelPostReactions },
+          { data: dbChannelComments },
         ] = await Promise.all([
           supabase.from('app_users').select('*').order('created_at'),
           supabase.from('app_chats').select('*').order('updated_at', { ascending: false }),
@@ -213,7 +217,45 @@ export function AppProvider({ children }: { children: ReactNode }) {
           supabase.from('app_calls').select('*').order('timestamp', { ascending: false }),
           supabase.from('app_notifications').select('*').order('timestamp', { ascending: false }),
           supabase.from('app_settings').select('*').eq('id', 'demo').maybeSingle(),
+          supabase.from('app_channel_posts').select('*').order('timestamp', { ascending: true }),
+          supabase.from('app_channel_post_reactions').select('*'),
+          supabase.from('app_channel_comments').select('*').order('timestamp', { ascending: true }),
         ]);
+
+        if (dbChannelPosts && dbChannelPosts.length > 0) {
+          const postReactionMap = new Map<string, Reaction[]>();
+          for (const r of dbChannelPostReactions || []) {
+            const arr = postReactionMap.get(r.post_id) || [];
+            arr.push({ emoji: r.emoji, userId: r.user_id });
+            postReactionMap.set(r.post_id, arr);
+          }
+          const commentMap = new Map<string, Comment[]>();
+          for (const c of dbChannelComments || []) {
+            const arr = commentMap.get(c.post_id) || [];
+            arr.push({
+              id: c.id,
+              postId: c.post_id,
+              authorId: c.author_id,
+              text: c.text,
+              timestamp: c.timestamp,
+              reactions: c.reactions || [],
+            });
+            commentMap.set(c.post_id, arr);
+          }
+          setChannelPosts(dbChannelPosts.map((p: any) => ({
+            id: p.id,
+            channelId: p.channel_id,
+            authorId: p.author_id,
+            text: p.text,
+            mediaUrl: p.media_url || undefined,
+            timestamp: p.timestamp,
+            reactions: postReactionMap.get(p.id) || [],
+            commentCount: commentMap.get(p.id)?.length || 0,
+            isPinned: p.is_pinned ?? false,
+            views: p.views || 0,
+            comments: commentMap.get(p.id) || [],
+          })));
+        }
 
         if (dbUsers && dbUsers.length > 0) {
           setUsers(dbUsers.map(dbUserToUser));
@@ -270,6 +312,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const completeProfile = useCallback((data: Partial<User>) => {
     setAuthStage('authenticated');
+    if (!isSupabaseConfigured) return;
     (async () => {
       try {
         await supabase.from('app_users').upsert({
@@ -292,7 +335,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const updateSettings = useCallback((patch: Partial<AppSettings>) => {
     setSettings(prev => {
       const next = { ...prev, ...patch };
-      (async () => {
+      if (isSupabaseConfigured) (async () => {
         try {
           await supabase.from('app_settings').upsert({
             id: 'demo',
@@ -337,7 +380,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         : c
     ));
 
-    (async () => {
+    if (isSupabaseConfigured) (async () => {
       try {
         await supabase.from('app_messages').insert({
           id: newMsg.id,
@@ -368,6 +411,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }, 800);
     setTimeout(() => {
       setMessages(prev => prev.map(m => m.id === newMsg.id ? { ...m, status: 'read', readAt: new Date().toISOString() } : m));
+      if (!isSupabaseConfigured) return;
       (async () => {
         try {
           await supabase.from('app_messages').update({ status: 'read', read_at: new Date().toISOString() }).eq('id', newMsg.id);
@@ -380,6 +424,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const editMessage = useCallback((messageId: string, newText: string) => {
     setMessages(prev => prev.map(m => m.id === messageId ? { ...m, text: newText, edited: true } : m));
+    if (!isSupabaseConfigured) return;
     (async () => {
       try {
         await supabase.from('app_messages').update({ text: newText, edited: true }).eq('id', messageId);
@@ -391,6 +436,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const deleteMessage = useCallback((messageId: string) => {
     setMessages(prev => prev.map(m => m.id === messageId ? { ...m, deleted: true, text: undefined, mediaUrl: undefined } : m));
+    if (!isSupabaseConfigured) return;
     (async () => {
       try {
         await supabase.from('app_messages').update({ deleted: true, text: null, media_url: null }).eq('id', messageId);
@@ -409,6 +455,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       return { ...m, reactions: [...m.reactions, { emoji, userId: currentUserId }] };
     }));
+    if (!isSupabaseConfigured) return;
     (async () => {
       try {
         const { data: existing } = await supabase
@@ -439,6 +486,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const togglePinChat = useCallback((chatId: string) => {
     setChats(prev => prev.map(c => c.id === chatId ? { ...c, isPinned: !c.isPinned } : c));
+    if (!isSupabaseConfigured) return;
     (async () => {
       try {
         const chat = chats.find(c => c.id === chatId);
@@ -453,6 +501,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const toggleMuteChat = useCallback((chatId: string) => {
     setChats(prev => prev.map(c => c.id === chatId ? { ...c, isMuted: !c.isMuted } : c));
+    if (!isSupabaseConfigured) return;
     (async () => {
       try {
         const chat = chats.find(c => c.id === chatId);
@@ -467,6 +516,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const markChatRead = useCallback((chatId: string) => {
     setChats(prev => prev.map(c => c.id === chatId ? { ...c, unreadCount: 0 } : c));
+    if (!isSupabaseConfigured) return;
     (async () => {
       try {
         await supabase.from('app_chats').update({ unread_count: 0 }).eq('id', chatId);
@@ -489,7 +539,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ...chat,
     };
     setChats(prev => [newChat, ...prev]);
-    (async () => {
+    if (isSupabaseConfigured) (async () => {
       try {
         await supabase.from('app_chats').insert({
           id,
@@ -514,7 +564,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const addMoment = useCallback((m: Omit<Moment, 'id' | 'timestamp' | 'viewedBy'>) => {
     const newMoment: Moment = { ...m, id: generateId(), timestamp: new Date().toISOString(), viewedBy: [] };
     setMoments(prev => [newMoment, ...prev]);
-    (async () => {
+    if (isSupabaseConfigured) (async () => {
       try {
         await supabase.from('app_moments').insert({
           id: newMoment.id,
@@ -536,6 +586,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         ? { ...m, viewedBy: [...m.viewedBy, currentUserId] }
         : m
     ));
+    if (!isSupabaseConfigured) return;
     (async () => {
       try {
         await supabase.from('app_moment_views').upsert({
@@ -563,6 +614,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
       comments: [],
     };
     setChannelPosts(prev => [newPost, ...prev]);
+    if (isSupabaseConfigured) (async () => {
+      try {
+        await supabase.from('app_channel_posts').insert({
+          id: newPost.id,
+          channel_id: channelId,
+          author_id: currentUserId,
+          text,
+          media_url: mediaUrl || null,
+          timestamp: newPost.timestamp,
+        });
+      } catch (err) {
+        console.warn('Failed to save channel post to Supabase', err);
+      }
+    })();
   }, [currentUserId]);
 
   const togglePostReaction = useCallback((postId: string, emoji: string) => {
@@ -574,6 +639,32 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       return { ...p, reactions: [...p.reactions, { emoji, userId: currentUserId }] };
     }));
+    if (isSupabaseConfigured) (async () => {
+      try {
+        const { data: existing } = await supabase
+          .from('app_channel_post_reactions')
+          .select('post_id')
+          .eq('post_id', postId)
+          .eq('user_id', currentUserId)
+          .eq('emoji', emoji)
+          .maybeSingle();
+        if (existing) {
+          await supabase.from('app_channel_post_reactions')
+            .delete()
+            .eq('post_id', postId)
+            .eq('user_id', currentUserId)
+            .eq('emoji', emoji);
+        } else {
+          await supabase.from('app_channel_post_reactions').insert({
+            post_id: postId,
+            user_id: currentUserId,
+            emoji,
+          });
+        }
+      } catch (err) {
+        console.warn('Failed to toggle post reaction in Supabase', err);
+      }
+    })();
   }, [currentUserId]);
 
   const addComment = useCallback((postId: string, text: string) => {
@@ -589,11 +680,35 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ? { ...p, comments: [...p.comments, newComment], commentCount: p.commentCount + 1 }
       : p
     ));
+    if (isSupabaseConfigured) (async () => {
+      try {
+        await supabase.from('app_channel_comments').insert({
+          id: newComment.id,
+          post_id: postId,
+          author_id: currentUserId,
+          text,
+          timestamp: newComment.timestamp,
+          reactions: '[]',
+        });
+      } catch (err) {
+        console.warn('Failed to save comment to Supabase', err);
+      }
+    })();
   }, [currentUserId]);
 
   const togglePinPost = useCallback((postId: string) => {
     setChannelPosts(prev => prev.map(p => p.id === postId ? { ...p, isPinned: !p.isPinned } : p));
-  }, []);
+    if (isSupabaseConfigured) (async () => {
+      try {
+        const post = channelPosts.find(p => p.id === postId);
+        if (post) {
+          await supabase.from('app_channel_posts').update({ is_pinned: !post.isPinned }).eq('id', postId);
+        }
+      } catch (err) {
+        console.warn('Failed to toggle post pin in Supabase', err);
+      }
+    })();
+  }, [channelPosts]);
 
   return (
     <AppContext.Provider value={{
