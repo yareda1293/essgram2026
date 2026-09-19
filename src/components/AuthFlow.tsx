@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useApp } from '@/store';
+import { supabase } from '@/lib/supabase';
 import { Spinner } from '@/components/ui';
 import { Phone, Shield, ChevronRight, Check, ArrowLeft, Camera, Send } from 'lucide-react';
 import { cn } from '@/lib/cn';
@@ -58,46 +59,63 @@ export function AuthFlow() {
     }
   }, [authStage]);
 
-  const handlePhoneSubmit = () => {
-    if (phoneNumber.replace(/\D/g, '').length < 10) {
-      setError('Please enter a valid phone number');
+ const handlePhoneSubmit = async () => {
+  const normalizedPhone = phoneNumber.replace(/\s/g, '');
+
+  if (!normalizedPhone.startsWith('+251') || normalizedPhone.length !== 13) {
+    setError('Please enter a valid Ethiopian phone number');
+    return;
+  }
+
+  setError('');
+  setLoading(true);
+
+  const { error } = await supabase.auth.signInWithOtp({
+    phone: normalizedPhone,
+  });
+
+  setLoading(false);
+
+  if (error) {
+    setError(error.message);
+    return;
+  }
+
+  setAuthStage('code');
+};
+
+ const handleCodeChange = (index: number, value: string) => {
+  if (!/^\d?$/.test(value)) return;
+  const newCode = [...code];
+  newCode[index] = value;
+  setCode(newCode);
+  setError('');
+
+  if (value && index < 5) {
+    codeRefs.current[index + 1]?.focus();
+  }
+
+  if (newCode.every(d => d !== '')) {
+    setLoading(true);
+
+    const normalizedPhone = phoneNumber.replace(/\s/g, '');
+
+    const { error } = await supabase.auth.verifyOtp({
+      phone: normalizedPhone,
+      token: newCode.join(''),
+      type: 'sms',
+    });
+
+    setLoading(false);
+
+    if (error) {
+      setError(error.message);
       return;
     }
-    setError('');
-    setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
-      setAuthStage('code');
-    }, 1500);
-  };
 
-  const handleCodeChange = (index: number, value: string) => {
-    if (!/^\d?$/.test(value)) return;
-    const newCode = [...code];
-    newCode[index] = value;
-    setCode(newCode);
-    setError('');
-
-    if (value && index < 5) {
-      codeRefs.current[index + 1]?.focus();
-    }
-
-    if (newCode.every(d => d !== '') && newCode.join('') === '123456') {
-      setLoading(true);
-      setTimeout(() => {
-        setLoading(false);
-        setAuthStage('profile');
-      }, 1000);
-    } else if (newCode.every(d => d !== '') && newCode.join('') !== '123456') {
-      // Still accept any code for demo
-      setLoading(true);
-      setTimeout(() => {
-        setLoading(false);
-        setAuthStage('profile');
-      }, 1000);
-    }
-  };
-
+    setAuthStage('profile');
+  }
+};
   const handleCodeKeyDown = (index: number, e: React.KeyboardEvent) => {
     if (e.key === 'Backspace' && !code[index] && index > 0) {
       codeRefs.current[index - 1]?.focus();
@@ -153,7 +171,7 @@ export function AuthFlow() {
                 value={phoneNumber}
                 onChange={e => setPhoneNumber(e.target.value)}
                 onFocus={() => {
-                  if (!phoneNumber) setPhoneNumber('+1 ');
+                  if (!phoneNumber) setPhoneNumber('+251 ');
                 }}
                 placeholder="+1 415 555 0192"
                 aria-label="Phone number including country code"
