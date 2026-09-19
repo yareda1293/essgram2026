@@ -84,7 +84,7 @@ export function AuthFlow() {
   setAuthStage('code');
 };
 
- const handleCodeChange = (index: number, value: string) => {
+ const handleCodeChange = async (index: number, value: string) => {
   if (!/^\d?$/.test(value)) return;
   const newCode = [...code];
   newCode[index] = value;
