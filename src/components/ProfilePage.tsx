@@ -31,7 +31,7 @@ const ACCENT_COLORS = [
 ];
 
 export function ProfilePage() {
-  const { currentUser, settings, updateSettings, users } = useApp();
+  const { currentUser, settings, updateSettings, users, signOut } = useApp();
   const [section, setSection] = useState<SettingsSection>('main');
   const [open, setOpen] = useState(false);
   const [editingProfile, setEditingProfile] = useState(false);
@@ -170,7 +170,7 @@ export function ProfilePage() {
             icon={LogOut}
             label="Log Out"
             desc="Sign out of your account"
-            onClick={() => {}}
+            onClick={signOut}
             iconColor="text-error-400"
             iconBg="bg-error-500/20"
           />
@@ -195,7 +195,7 @@ export function ProfilePage() {
             <SettingsRow icon={Bell} label="Notifications" onClick={() => setSection('notifications')} iconColor="text-violet-400" iconBg="bg-violet-600/20" />
             <SettingsRow icon={Palette} label="Appearance" onClick={() => setSection('appearance')} iconColor="text-pink-400" iconBg="bg-pink-500/20" />
             <SettingsRow icon={CircleHelp} label="Help & Support" onClick={() => window.open('https://t.me/novajared', '_blank')} iconColor="text-ink-300" iconBg="bg-white/5" />
-            <SettingsRow icon={LogOut} label="Log Out" onClick={() => {}} iconColor="text-error-400" iconBg="bg-error-500/20" />
+            <SettingsRow icon={LogOut} label="Log Out" onClick={signOut} iconColor="text-error-400" iconBg="bg-error-500/20" />
           </div>
         )}
 

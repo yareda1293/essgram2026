@@ -24,6 +24,7 @@ interface AppState {
   setAuthStage: (s: AuthStage) => void;
   setPhoneNumber: (p: string) => void;
   completeProfile: (data: Partial<User>) => void;
+  signOut: () => void;
 
   activeTab: TabKey;
   setActiveTab: (t: TabKey) => void;
@@ -160,7 +161,7 @@ function dbNotificationToNotification(row: any): Notification {
 export function AppProvider({ children }: { children: ReactNode }) {
   const [authStage, setAuthStage] = useState<AuthStage>('phone');
   const [phoneNumber, setPhoneNumber] = useState('');
-  const [currentUserId] = useState(CURRENT_USER_ID);
+  const [currentUserId, setCurrentUserId] = useState(CURRENT_USER_ID);
   const [activeTab, setActiveTab] = useState<TabKey>('chats');
 
   const [users, setUsers] = useState<User[]>(seedUsers);
@@ -185,6 +186,71 @@ export function AppProvider({ children }: { children: ReactNode }) {
   });
 
   const loadedRef = useRef(false);
+
+  // ---- Check for existing Supabase session on mount ----
+  // Restores authentication if the user reloads the page.
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+
+    (async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          const supabaseUserId = session.user.id;
+          setCurrentUserId(supabaseUserId);
+          // Check if this user already has a profile in app_users
+          const { data: existingUser } = await supabase
+            .from('app_users')
+            .select('id')
+            .eq('id', supabaseUserId)
+            .maybeSingle();
+          if (existingUser) {
+            setAuthStage('authenticated');
+          } else {
+            setAuthStage('profile');
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to restore Supabase session', err);
+      }
+    })();
+
+    // ---- Listen for auth state changes ----
+    // Uses the async IIFE pattern to avoid deadlocking onAuthStateChange.
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      (async () => {
+        if (event === 'SIGNED_OUT' || !session?.user) {
+          setCurrentUserId(CURRENT_USER_ID);
+          setAuthStage('phone');
+          setPhoneNumber('');
+          return;
+        }
+        if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
+          const supabaseUserId = session.user.id;
+          setCurrentUserId(supabaseUserId);
+          // The AuthFlow component handles the stage transition to 'profile'
+          // after OTP verification. Here we only restore if the user already
+          // has a profile (e.g. page reload while signed in).
+          try {
+            const { data: existingUser } = await supabase
+              .from('app_users')
+              .select('id')
+              .eq('id', supabaseUserId)
+              .maybeSingle();
+            if (existingUser) {
+              setAuthStage('authenticated');
+            }
+          } catch {
+            // If the query fails, leave the current stage as-is
+          }
+        }
+      })();
+    });
+
+    return () => {
+      authListener?.subscription.unsubscribe();
+    };
+  }, []);
 
   // ---- Load all data from Supabase on mount ----
   useEffect(() => {
@@ -313,12 +379,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const completeProfile = useCallback((data: Partial<User>) => {
     setAuthStage('authenticated');
     if (!isSupabaseConfigured) return;
+    // Use the real Supabase auth user ID, not the hardcoded seed ID.
+    // If no Supabase session exists (e.g. not configured), fall back to seed.
     (async () => {
       try {
+        const { data: { session } } = await supabase.auth.getSession();
+        const userId = session?.user?.id || currentUserId;
+        if (session?.user?.id) {
+          setCurrentUserId(session.user.id);
+        }
         await supabase.from('app_users').upsert({
-          id: currentUserId,
+          id: userId,
           name: data.name || 'New User',
           username: data.username || '@newuser',
+          phone: session?.user?.phone || '',
           avatar: data.avatar || '',
           bio: data.bio || '',
           status: data.status || null,
@@ -331,6 +405,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     })();
   }, [currentUserId]);
+
+  const signOut = useCallback(() => {
+    setAuthStage('phone');
+    setPhoneNumber('');
+    setCurrentUserId(CURRENT_USER_ID);
+    if (!isSupabaseConfigured) return;
+    (async () => {
+      try {
+        await supabase.auth.signOut();
+      } catch (err) {
+        console.warn('Failed to sign out from Supabase', err);
+      }
+    })();
+  }, []);
 
   const updateSettings = useCallback((patch: Partial<AppSettings>) => {
     setSettings(prev => {
@@ -713,7 +801,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   return (
     <AppContext.Provider value={{
       authStage, phoneNumber, currentUserId, currentUser,
-      setAuthStage, setPhoneNumber, completeProfile,
+      setAuthStage, setPhoneNumber, completeProfile, signOut,
       activeTab, setActiveTab,
       users, chats, messages, moments, calls, notifications, channelPosts,
       settings, updateSettings,

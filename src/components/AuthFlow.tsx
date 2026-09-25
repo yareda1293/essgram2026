@@ -1,8 +1,8 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useApp } from '@/store';
 import { supabase } from '@/lib/supabase';
 import { Spinner } from '@/components/ui';
-import { Phone, Shield, ChevronRight, Check, ArrowLeft, Camera, Send } from 'lucide-react';
+import { Phone, Shield, ChevronRight, Check, ArrowLeft, Camera, Send, AlertCircle } from 'lucide-react';
 import { cn } from '@/lib/cn';
 
 function Logo({ size = 'large' }: { size?: 'small' | 'large' }) {
@@ -21,11 +21,68 @@ function Logo({ size = 'large' }: { size?: 'small' | 'large' }) {
   );
 }
 
+/**
+ * Normalizes a phone number to E.164 format.
+ * Strips spaces, dashes, parentheses. Ensures it starts with "+".
+ * Does NOT add a country code automatically — the user must enter the full
+ * international number so Supabase can route the SMS correctly.
+ */
+function normalizeToE164(input: string): string {
+  let cleaned = input.replace(/[\s\-()]/g, '');
+  if (!cleaned.startsWith('+')) {
+    if (cleaned.startsWith('00')) {
+      cleaned = '+' + cleaned.slice(2);
+    } else if (cleaned.startsWith('0')) {
+      // Local number without country code — not valid for Supabase OTP
+      return input;
+    } else {
+      cleaned = '+' + cleaned;
+    }
+  }
+  return cleaned;
+}
+
+/**
+ * Validates that a phone number looks like a plausible E.164 number.
+ * E.164: starts with "+", followed by 7-15 digits (country code + number).
+ */
+function isValidE164(phone: string): boolean {
+  return /^\+\d{7,15}$/.test(phone);
+}
+
+/**
+ * Maps a Supabase auth error to a user-friendly message.
+ */
+function mapAuthError(error: { message: string }): string {
+  const msg = error.message.toLowerCase();
+  if (msg.includes('phone provider') || msg.includes('sms_provider') || msg.includes('not enabled') || msg.includes('not configured')) {
+    return 'Phone authentication is not enabled. The Supabase project owner must enable the Phone provider in Authentication > Providers and configure an SMS gateway (Twilio, Vonage, or Messagebird).';
+  }
+  if (msg.includes('rate limit') || msg.includes('too many') || msg.includes('over_send') || msg.includes('for security reasons')) {
+    return 'Too many requests. Please wait a minute before requesting another code.';
+  }
+  if (msg.includes('invalid') && msg.includes('otp')) {
+    return 'The verification code is invalid or has expired. Please request a new code.';
+  }
+  if (msg.includes('expired')) {
+    return 'This code has expired. Please request a new one.';
+  }
+  if (msg.includes('network') || msg.includes('fetch') || msg.includes('failed to fetch')) {
+    return 'Network error. Please check your internet connection and try again.';
+  }
+  if (msg.includes('phone') && msg.includes('format')) {
+    return 'Invalid phone number format. Please enter your number in international format, e.g. +2519XXXXXXXX.';
+  }
+  return error.message;
+}
+
 export function AuthFlow() {
-  const { authStage, setAuthStage, phoneNumber, setPhoneNumber, completeProfile } = useApp();
+  const { authStage, setAuthStage, phoneNumber, setPhoneNumber, completeProfile, signOut } = useApp();
   const [code, setCode] = useState(['', '', '', '', '', '']);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
+  const [resendCooldown, setResendCooldown] = useState(0);
   const codeRefs = useRef<(HTMLInputElement | null)[]>([]);
 
   // Profile setup
@@ -59,92 +116,139 @@ export function AuthFlow() {
     }
   }, [authStage]);
 
- const handlePhoneSubmit = async () => {
-  const normalizedPhone = phoneNumber.replace(/\s/g, '');
+  // Resend cooldown timer
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = setTimeout(() => setResendCooldown(c => c - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [resendCooldown]);
 
-  if (!normalizedPhone.startsWith('+251') || normalizedPhone.length !== 13) {
-    setError('Please enter a valid Ethiopian phone number');
-    return;
-  }
+  // ---- Send OTP ----
+  const handlePhoneSubmit = useCallback(async () => {
+    const normalized = normalizeToE164(phoneNumber);
 
-  setError('');
-  setLoading(true);
+    if (!isValidE164(normalized)) {
+      setError('Please enter a valid phone number in international format, e.g. +2519XXXXXXXX');
+      return;
+    }
 
-  const { error } = await supabase.auth.signInWithOtp({
-    phone: normalizedPhone,
-  });
-
-  setLoading(false);
-
-  if (error) {
-    setError(error.message);
-    return;
-  }
-
-  setAuthStage('code');
-};
-
- const handleCodeChange = async (index: number, value: string) => {
-  if (!/^\d?$/.test(value)) return;
-  const newCode = [...code];
-  newCode[index] = value;
-  setCode(newCode);
-  setError('');
-
-  if (value && index < 5) {
-    codeRefs.current[index + 1]?.focus();
-  }
-
-  if (newCode.every(d => d !== '')) {
+    setError('');
+    setInfo('');
     setLoading(true);
 
-    const normalizedPhone = phoneNumber.replace(/\s/g, '');
-
-    const { error } = await supabase.auth.verifyOtp({
-      phone: normalizedPhone,
-      token: newCode.join(''),
-      type: 'sms',
+    const { error: otpError } = await supabase.auth.signInWithOtp({
+      phone: normalized,
     });
 
     setLoading(false);
 
-    if (error) {
-      setError(error.message);
+    if (otpError) {
+      setError(mapAuthError(otpError));
       return;
     }
 
-    setAuthStage('profile');
-  }
-};
+    setInfo('A verification code has been sent to your phone via SMS.');
+    setPhoneNumber(normalized);
+    setResendCooldown(60);
+    setCode(['', '', '', '', '', '']);
+    setAuthStage('code');
+  }, [phoneNumber, setAuthStage, setPhoneNumber]);
+
+  // ---- Resend OTP ----
+  const handleResend = useCallback(async () => {
+    if (resendCooldown > 0 || loading) return;
+    const normalized = normalizeToE164(phoneNumber);
+    if (!isValidE164(normalized)) return;
+
+    setError('');
+    setInfo('');
+    setLoading(true);
+
+    const { error: otpError } = await supabase.auth.signInWithOtp({
+      phone: normalized,
+    });
+
+    setLoading(false);
+
+    if (otpError) {
+      setError(mapAuthError(otpError));
+      return;
+    }
+
+    setInfo('A new code has been sent.');
+    setResendCooldown(60);
+    setCode(['', '', '', '', '', '']);
+    codeRefs.current[0]?.focus();
+  }, [phoneNumber, resendCooldown, loading]);
+
+  // ---- Verify OTP ----
+  const handleCodeChange = useCallback(async (index: number, value: string) => {
+    if (!/^\d?$/.test(value)) return;
+    const newCode = [...code];
+    newCode[index] = value;
+    setCode(newCode);
+    setError('');
+    setInfo('');
+
+    if (value && index < 5) {
+      codeRefs.current[index + 1]?.focus();
+    }
+
+    if (newCode.every(d => d !== '')) {
+      setLoading(true);
+      const normalized = normalizeToE164(phoneNumber);
+
+      const { data, error: verifyError } = await supabase.auth.verifyOtp({
+        phone: normalized,
+        token: newCode.join(''),
+        type: 'sms',
+      });
+
+      setLoading(false);
+
+      if (verifyError) {
+        setError(mapAuthError(verifyError));
+        // Clear the code so user can re-enter
+        setCode(['', '', '', '', '', '']);
+        codeRefs.current[0]?.focus();
+        return;
+      }
+
+      // Successfully verified — Supabase now has an active session.
+      // The onAuthStateChange listener in store.tsx will detect the session
+      // and transition the app to the authenticated state. We also set it
+      // here as a fallback in case the listener hasn't fired yet.
+      if (data?.user) {
+        setAuthStage('profile');
+      }
+    }
+  }, [code, phoneNumber, setAuthStage]);
+
   const handleCodeKeyDown = (index: number, e: React.KeyboardEvent) => {
     if (e.key === 'Backspace' && !code[index] && index > 0) {
       codeRefs.current[index - 1]?.focus();
     }
   };
 
-  const handleProfileSubmit = () => {
+  // ---- Profile submit ----
+  const handleProfileSubmit = useCallback(() => {
     if (!fullName.trim() || !username.trim()) {
       setError('Please enter your name and username');
       return;
     }
     setError('');
     setLoading(true);
-    setTimeout(() => {
-      setLoading(false);
-      completeProfile({ name: fullName, username: '@' + username.replace('@', ''), bio, status, avatar: photoUrl });
-    }, 1500);
-  };
+    completeProfile({ name: fullName, username: '@' + username.replace('@', ''), bio, status, avatar: photoUrl });
+  }, [fullName, username, bio, status, photoUrl, completeProfile]);
 
   // ---- Phone screen ----
   if (authStage === 'phone') {
     return (
       <div className="min-h-screen relative flex flex-col items-center justify-center px-6 safe-top safe-bottom overflow-hidden">
-        {/* Realistic gradient background */}
         <div
           className="absolute inset-0"
           style={{ background: 'linear-gradient(165deg, #0f172a 0%, #1e293b 35%, #0f4a5e 70%, #064e3b 100%)' }}
         />
-        {/* Decorative glow orbs */}
         <div className="absolute top-[-10%] left-[-15%] w-80 h-80 rounded-full blur-3xl opacity-30" style={{ background: 'radial-gradient(circle, #0ea5e9 0%, transparent 70%)' }} />
         <div className="absolute bottom-[-10%] right-[-15%] w-80 h-80 rounded-full blur-3xl opacity-25" style={{ background: 'radial-gradient(circle, #10b981 0%, transparent 70%)' }} />
         <div className="absolute top-[40%] left-[60%] w-60 h-60 rounded-full blur-3xl opacity-20" style={{ background: 'radial-gradient(circle, #14b8a6 0%, transparent 70%)' }} />
@@ -171,26 +275,41 @@ export function AuthFlow() {
                 value={phoneNumber}
                 onChange={e => setPhoneNumber(e.target.value)}
                 onFocus={() => {
-                  if (!phoneNumber) setPhoneNumber('+251 ');
+                  if (!phoneNumber) setPhoneNumber('+');
                 }}
-                placeholder="+1 415 555 0192"
-                aria-label="Phone number including country code"
+                placeholder="+2519XXXXXXXX"
+                aria-label="Phone number in international format with country code"
                 className="w-full pl-14 pr-4 py-4 text-base rounded-xl bg-white/[0.06] border border-white/10 text-white placeholder:text-slate-300/80 outline-none transition-all focus:border-sky-400/50 focus:bg-white/[0.08] backdrop-blur-sm"
                 onKeyDown={e => e.key === 'Enter' && handlePhoneSubmit()}
+                disabled={loading}
               />
             </div>
 
-            {error && <p className="text-sm text-red-400 animate-fade-in">{error}</p>}
+            <p className="text-xs text-slate-500 leading-relaxed">
+              Use the full international format including the "+" symbol and country code. Example: +251912345678
+            </p>
+
+            {error && (
+              <div className="flex items-start gap-2 p-3 rounded-xl bg-red-500/10 border border-red-500/20 animate-fade-in">
+                <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                <p className="text-sm text-red-400 leading-relaxed">{error}</p>
+              </div>
+            )}
 
             <button
               onClick={handlePhoneSubmit}
               disabled={loading}
-              className="w-full flex items-center justify-center gap-2 py-4 rounded-xl font-semibold text-white text-sm transition-all active:scale-95 shadow-lg"
+              className="w-full flex items-center justify-center gap-2 py-4 rounded-xl font-semibold text-white text-sm transition-all active:scale-95 shadow-lg disabled:opacity-60"
               style={{ background: 'linear-gradient(135deg, #0ea5e9 0%, #14b8a6 100%)', boxShadow: '0 8px 24px -8px rgba(14, 165, 233, 0.6)' }}
             >
-              {loading ? <Spinner size={20} /> : (
+              {loading ? (
                 <>
-                  Continue
+                  <Spinner size={20} />
+                  <span>Sending code...</span>
+                </>
+              ) : (
+                <>
+                  Send Verification Code
                   <ChevronRight className="w-5 h-5" />
                 </>
               )}
@@ -217,7 +336,7 @@ export function AuthFlow() {
 
         <div className="relative w-full max-w-sm flex flex-col items-center animate-fade-in-up">
           <button
-            onClick={() => { setAuthStage('phone'); setCode(['', '', '', '', '', '']); }}
+            onClick={() => { setAuthStage('phone'); setCode(['', '', '', '', '', '']); setError(''); setInfo(''); }}
             className="self-start mb-6 w-10 h-10 rounded-xl bg-white/[0.06] border border-white/10 flex items-center justify-center text-slate-300 hover:bg-white/10 transition-colors"
           >
             <ArrowLeft className="w-5 h-5" />
@@ -246,6 +365,7 @@ export function AuthFlow() {
                 value={digit}
                 onChange={e => handleCodeChange(i, e.target.value)}
                 onKeyDown={e => handleCodeKeyDown(i, e)}
+                disabled={loading}
                 className={cn(
                   'w-12 h-14 rounded-xl text-center text-xl font-bold transition-all',
                   digit
@@ -257,29 +377,41 @@ export function AuthFlow() {
             ))}
           </div>
 
-          {error && <p className="text-sm text-red-400 mb-4">{error}</p>}
-
-          {loading && (
-            <div className="flex items-center gap-2 text-sky-400">
-              <Spinner size={20} />
-              <span className="text-sm">Verifying...</span>
+          {error && (
+            <div className="flex items-start gap-2 p-3 rounded-xl bg-red-500/10 border border-red-500/20 mb-4 max-w-sm">
+              <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+              <p className="text-sm text-red-400 leading-relaxed">{error}</p>
             </div>
           )}
 
-          <button className="text-sm text-slate-400 hover:text-sky-400 transition-colors mt-4">
-            Didn't receive a code? Resend
-          </button>
-
-          <div className="w-full mt-8 p-4 rounded-xl bg-white/[0.04] border border-white/5">
-            <div className="flex items-center gap-3">
-              <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: 'rgba(14, 165, 233, 0.15)' }}>
-                <Check className="w-4 h-4 text-sky-400" />
-              </div>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                Demo tip: enter any 6 digits to continue.
-              </p>
+          {info && !error && (
+            <div className="flex items-start gap-2 p-3 rounded-xl bg-sky-500/10 border border-sky-500/20 mb-4 max-w-sm">
+              <Check className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
+              <p className="text-sm text-sky-300 leading-relaxed">{info}</p>
             </div>
-          </div>
+          )}
+
+          {loading && (
+            <div className="flex items-center gap-2 text-sky-400 mb-4">
+              <Spinner size={20} />
+              <span className="text-sm">Verifying code...</span>
+            </div>
+          )}
+
+          <button
+            onClick={handleResend}
+            disabled={resendCooldown > 0 || loading}
+            className={cn(
+              'text-sm transition-colors mt-2',
+              resendCooldown > 0 || loading
+                ? 'text-slate-600 cursor-not-allowed'
+                : 'text-slate-400 hover:text-sky-400'
+            )}
+          >
+            {resendCooldown > 0
+              ? `Resend code in ${resendCooldown}s`
+              : "Didn't receive a code? Resend"}
+          </button>
         </div>
       </div>
     );
@@ -296,8 +428,23 @@ export function AuthFlow() {
         <div className="absolute top-[-10%] left-[-15%] w-80 h-80 rounded-full blur-3xl opacity-25" style={{ background: 'radial-gradient(circle, #10b981 0%, transparent 70%)' }} />
 
         <div className="relative w-full max-w-sm mx-auto flex flex-col py-8 animate-fade-in-up">
-          <div className="mb-6 flex justify-center">
+          <div className="flex justify-between items-center mb-6">
+            <button
+              onClick={() => {
+                signOut();
+                setFullName('');
+                setUsername('');
+                setBio('');
+                setStatus('');
+                setPhotoUrl('');
+                setError('');
+              }}
+              className="w-10 h-10 rounded-xl bg-white/[0.06] border border-white/10 flex items-center justify-center text-slate-300 hover:bg-white/10 transition-colors"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </button>
             <Logo size="small" />
+            <div className="w-10" />
           </div>
 
           <h1 className="font-display text-2xl font-bold text-white mb-1 text-center">
@@ -387,7 +534,7 @@ export function AuthFlow() {
             <button
               onClick={handleProfileSubmit}
               disabled={loading}
-              className="w-full flex items-center justify-center gap-2 py-4 rounded-xl font-semibold text-white text-sm transition-all active:scale-95 shadow-lg mt-2"
+              className="w-full flex items-center justify-center gap-2 py-4 rounded-xl font-semibold text-white text-sm transition-all active:scale-95 shadow-lg mt-2 disabled:opacity-60"
               style={{ background: 'linear-gradient(135deg, #0ea5e9 0%, #14b8a6 100%)', boxShadow: '0 8px 24px -8px rgba(14, 165, 233, 0.6)' }}
             >
               {loading ? <Spinner size={20} /> : (
