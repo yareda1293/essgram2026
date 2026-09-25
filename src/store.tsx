@@ -14,15 +14,17 @@ import {
 import { generateId } from './utils';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
 
-type AuthStage = 'phone' | 'code' | 'profile' | 'authenticated';
+type AuthStage = 'register' | 'code' | 'profile' | 'authenticated';
 
 interface AppState {
   authStage: AuthStage;
   phoneNumber: string;
+  email: string;
   currentUserId: string;
   currentUser: User;
   setAuthStage: (s: AuthStage) => void;
   setPhoneNumber: (p: string) => void;
+  setEmail: (e: string) => void;
   completeProfile: (data: Partial<User>) => void;
   signOut: () => void;
 
@@ -159,8 +161,9 @@ function dbNotificationToNotification(row: any): Notification {
 }
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [authStage, setAuthStage] = useState<AuthStage>('phone');
+  const [authStage, setAuthStage] = useState<AuthStage>('register');
   const [phoneNumber, setPhoneNumber] = useState('');
+  const [email, setEmail] = useState('');
   const [currentUserId, setCurrentUserId] = useState(CURRENT_USER_ID);
   const [activeTab, setActiveTab] = useState<TabKey>('chats');
 
@@ -198,10 +201,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (session?.user) {
           const supabaseUserId = session.user.id;
           setCurrentUserId(supabaseUserId);
+          if (session.user.email) setEmail(session.user.email);
           // Check if this user already has a profile in app_users
           const { data: existingUser } = await supabase
             .from('app_users')
-            .select('id')
+            .select('id, phone, email')
             .eq('id', supabaseUserId)
             .maybeSingle();
           if (existingUser) {
@@ -221,8 +225,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       (async () => {
         if (event === 'SIGNED_OUT' || !session?.user) {
           setCurrentUserId(CURRENT_USER_ID);
-          setAuthStage('phone');
+          setAuthStage('register');
           setPhoneNumber('');
+          setEmail('');
           return;
         }
         if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
@@ -243,6 +248,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           } catch {
             // If the query fails, leave the current stage as-is
           }
+          if (session.user.email) setEmail(session.user.email);
         }
       })();
     });
@@ -379,8 +385,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const completeProfile = useCallback((data: Partial<User>) => {
     setAuthStage('authenticated');
     if (!isSupabaseConfigured) return;
-    // Use the real Supabase auth user ID, not the hardcoded seed ID.
-    // If no Supabase session exists (e.g. not configured), fall back to seed.
     (async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
@@ -392,7 +396,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           id: userId,
           name: data.name || 'New User',
           username: data.username || '@newuser',
-          phone: session?.user?.phone || '',
+          phone: data.phone || phoneNumber || '',
+          email: session?.user?.email || email || '',
           avatar: data.avatar || '',
           bio: data.bio || '',
           status: data.status || null,
@@ -404,11 +409,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         console.warn('Failed to save profile to Supabase', err);
       }
     })();
-  }, [currentUserId]);
+  }, [currentUserId, phoneNumber, email]);
 
   const signOut = useCallback(() => {
-    setAuthStage('phone');
+    setAuthStage('register');
     setPhoneNumber('');
+    setEmail('');
     setCurrentUserId(CURRENT_USER_ID);
     if (!isSupabaseConfigured) return;
     (async () => {
@@ -800,8 +806,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   return (
     <AppContext.Provider value={{
-      authStage, phoneNumber, currentUserId, currentUser,
-      setAuthStage, setPhoneNumber, completeProfile, signOut,
+      authStage, phoneNumber, email, currentUserId, currentUser,
+      setAuthStage, setPhoneNumber, setEmail, completeProfile, signOut,
       activeTab, setActiveTab,
       users, chats, messages, moments, calls, notifications, channelPosts,
       settings, updateSettings,

@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useApp } from '@/store';
 import { supabase } from '@/lib/supabase';
 import { Spinner } from '@/components/ui';
-import { Phone, Shield, ChevronRight, Check, ArrowLeft, Camera, Send, AlertCircle } from 'lucide-react';
+import { Phone, Mail, Lock, Shield, ChevronRight, Check, ArrowLeft, Camera, Send, AlertCircle, Eye, EyeOff } from 'lucide-react';
 import { cn } from '@/lib/cn';
 
 function Logo({ size = 'large' }: { size?: 'small' | 'large' }) {
@@ -21,19 +21,16 @@ function Logo({ size = 'large' }: { size?: 'small' | 'large' }) {
   );
 }
 
-/**
- * Normalizes a phone number to E.164 format.
- * Strips spaces, dashes, parentheses. Ensures it starts with "+".
- * Does NOT add a country code automatically — the user must enter the full
- * international number so Supabase can route the SMS correctly.
- */
-function normalizeToE164(input: string): string {
+function isValidEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function normalizePhone(input: string): string {
   let cleaned = input.replace(/[\s\-()]/g, '');
   if (!cleaned.startsWith('+')) {
     if (cleaned.startsWith('00')) {
       cleaned = '+' + cleaned.slice(2);
     } else if (cleaned.startsWith('0')) {
-      // Local number without country code — not valid for Supabase OTP
       return input;
     } else {
       cleaned = '+' + cleaned;
@@ -42,42 +39,43 @@ function normalizeToE164(input: string): string {
   return cleaned;
 }
 
-/**
- * Validates that a phone number looks like a plausible E.164 number.
- * E.164: starts with "+", followed by 7-15 digits (country code + number).
- */
-function isValidE164(phone: string): boolean {
+function isValidPhone(phone: string): boolean {
   return /^\+\d{7,15}$/.test(phone);
 }
 
-/**
- * Maps a Supabase auth error to a user-friendly message.
- */
 function mapAuthError(error: { message: string }): string {
   const msg = error.message.toLowerCase();
-  if (msg.includes('phone provider') || msg.includes('sms_provider') || msg.includes('not enabled') || msg.includes('not configured')) {
-    return 'Phone authentication is not enabled. The Supabase project owner must enable the Phone provider in Authentication > Providers and configure an SMS gateway (Twilio, Vonage, or Messagebird).';
-  }
   if (msg.includes('rate limit') || msg.includes('too many') || msg.includes('over_send') || msg.includes('for security reasons')) {
     return 'Too many requests. Please wait a minute before requesting another code.';
   }
-  if (msg.includes('invalid') && msg.includes('otp')) {
+  if (msg.includes('invalid') && (msg.includes('otp') || msg.includes('token') || msg.includes('code'))) {
     return 'The verification code is invalid or has expired. Please request a new code.';
   }
   if (msg.includes('expired')) {
     return 'This code has expired. Please request a new one.';
   }
+  if (msg.includes('email provider') || msg.includes('not enabled') || msg.includes('not configured')) {
+    return 'Email authentication is not enabled. The Supabase project owner must enable the Email provider in Authentication > Providers.';
+  }
+  if (msg.includes('already registered') || msg.includes('already been registered')) {
+    return 'This email is already registered. Try signing in instead.';
+  }
+  if (msg.includes('password') && msg.includes('weak')) {
+    return 'Password is too weak. Please use at least 8 characters with a mix of letters and numbers.';
+  }
   if (msg.includes('network') || msg.includes('fetch') || msg.includes('failed to fetch')) {
     return 'Network error. Please check your internet connection and try again.';
   }
-  if (msg.includes('phone') && msg.includes('format')) {
-    return 'Invalid phone number format. Please enter your number in international format, e.g. +2519XXXXXXXX.';
+  if (msg.includes('email') && msg.includes('format')) {
+    return 'Invalid email address format.';
   }
   return error.message;
 }
 
 export function AuthFlow() {
-  const { authStage, setAuthStage, phoneNumber, setPhoneNumber, completeProfile, signOut } = useApp();
+  const { authStage, setAuthStage, phoneNumber, setPhoneNumber, email, setEmail, completeProfile, signOut } = useApp();
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [code, setCode] = useState(['', '', '', '', '', '']);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -116,70 +114,82 @@ export function AuthFlow() {
     }
   }, [authStage]);
 
-  // Resend cooldown timer
   useEffect(() => {
     if (resendCooldown <= 0) return;
     const timer = setTimeout(() => setResendCooldown(c => c - 1), 1000);
     return () => clearTimeout(timer);
   }, [resendCooldown]);
 
-  // ---- Send OTP ----
-  const handlePhoneSubmit = useCallback(async () => {
-    const normalized = normalizeToE164(phoneNumber);
+  // ---- Send email OTP ----
+  const handleRegisterSubmit = useCallback(async () => {
+    const normalizedPhone = normalizePhone(phoneNumber);
 
-    if (!isValidE164(normalized)) {
+    if (!isValidPhone(normalizedPhone)) {
       setError('Please enter a valid phone number in international format, e.g. +2519XXXXXXXX');
+      return;
+    }
+    if (!isValidEmail(email)) {
+      setError('Please enter a valid email address.');
+      return;
+    }
+    if (password.length < 8) {
+      setError('Password must be at least 8 characters long.');
       return;
     }
 
     setError('');
     setInfo('');
     setLoading(true);
+    setPhoneNumber(normalizedPhone);
 
-    const { error: otpError } = await supabase.auth.signInWithOtp({
-      phone: normalized,
+    // Sign up with email + password. Supabase will send a confirmation OTP to the email.
+    const { error: signUpError } = await supabase.auth.signUp({
+      email,
+      password,
     });
 
     setLoading(false);
 
-    if (otpError) {
-      setError(mapAuthError(otpError));
+    if (signUpError) {
+      setError(mapAuthError(signUpError));
       return;
     }
 
-    setInfo('A verification code has been sent to your phone via SMS.');
-    setPhoneNumber(normalized);
+    // signUp with email/password sends a confirmation email by default.
+    // The email contains a link or OTP code. We transition to the code screen
+    // so the user can enter the 6-digit code from the email.
+    setInfo('A 6-digit verification code has been sent to your email.');
     setResendCooldown(60);
     setCode(['', '', '', '', '', '']);
     setAuthStage('code');
-  }, [phoneNumber, setAuthStage, setPhoneNumber]);
+  }, [phoneNumber, email, password, setAuthStage, setPhoneNumber]);
 
   // ---- Resend OTP ----
   const handleResend = useCallback(async () => {
     if (resendCooldown > 0 || loading) return;
-    const normalized = normalizeToE164(phoneNumber);
-    if (!isValidE164(normalized)) return;
+    if (!isValidEmail(email)) return;
 
     setError('');
     setInfo('');
     setLoading(true);
 
-    const { error: otpError } = await supabase.auth.signInWithOtp({
-      phone: normalized,
+    const { error: resendError } = await supabase.auth.resend({
+      type: 'signup',
+      email,
     });
 
     setLoading(false);
 
-    if (otpError) {
-      setError(mapAuthError(otpError));
+    if (resendError) {
+      setError(mapAuthError(resendError));
       return;
     }
 
-    setInfo('A new code has been sent.');
+    setInfo('A new code has been sent to your email.');
     setResendCooldown(60);
     setCode(['', '', '', '', '', '']);
     codeRefs.current[0]?.focus();
-  }, [phoneNumber, resendCooldown, loading]);
+  }, [email, resendCooldown, loading]);
 
   // ---- Verify OTP ----
   const handleCodeChange = useCallback(async (index: number, value: string) => {
@@ -196,33 +206,29 @@ export function AuthFlow() {
 
     if (newCode.every(d => d !== '')) {
       setLoading(true);
-      const normalized = normalizeToE164(phoneNumber);
+      const otpToken = newCode.join('');
 
+      // Verify the email OTP code
       const { data, error: verifyError } = await supabase.auth.verifyOtp({
-        phone: normalized,
-        token: newCode.join(''),
-        type: 'sms',
+        email,
+        token: otpToken,
+        type: 'signup',
       });
 
       setLoading(false);
 
       if (verifyError) {
         setError(mapAuthError(verifyError));
-        // Clear the code so user can re-enter
         setCode(['', '', '', '', '', '']);
         codeRefs.current[0]?.focus();
         return;
       }
 
-      // Successfully verified — Supabase now has an active session.
-      // The onAuthStateChange listener in store.tsx will detect the session
-      // and transition the app to the authenticated state. We also set it
-      // here as a fallback in case the listener hasn't fired yet.
       if (data?.user) {
         setAuthStage('profile');
       }
     }
-  }, [code, phoneNumber, setAuthStage]);
+  }, [code, email, setAuthStage]);
 
   const handleCodeKeyDown = (index: number, e: React.KeyboardEvent) => {
     if (e.key === 'Backspace' && !code[index] && index > 0) {
@@ -238,11 +244,18 @@ export function AuthFlow() {
     }
     setError('');
     setLoading(true);
-    completeProfile({ name: fullName, username: '@' + username.replace('@', ''), bio, status, avatar: photoUrl });
-  }, [fullName, username, bio, status, photoUrl, completeProfile]);
+    completeProfile({
+      name: fullName,
+      username: '@' + username.replace('@', ''),
+      bio,
+      status,
+      avatar: photoUrl,
+      phone: phoneNumber,
+    });
+  }, [fullName, username, bio, status, photoUrl, phoneNumber, completeProfile]);
 
-  // ---- Phone screen ----
-  if (authStage === 'phone') {
+  // ---- Registration screen ----
+  if (authStage === 'register') {
     return (
       <div className="min-h-screen relative flex flex-col items-center justify-center px-6 safe-top safe-bottom overflow-hidden">
         <div
@@ -261,11 +274,12 @@ export function AuthFlow() {
             Ess Gram
           </h1>
           <p className="text-sky-200/80 text-center mb-1 font-medium">Your people. Your space.</p>
-          <p className="text-sm text-slate-400 text-center mb-10 leading-relaxed">
-            Enter your phone number to get started. We'll send you a verification code via SMS.
+          <p className="text-sm text-slate-400 text-center mb-8 leading-relaxed">
+            Create your account. We'll send a verification code to your email.
           </p>
 
-          <div className="w-full space-y-4">
+          <div className="w-full space-y-3">
+            {/* Phone number (profile info, not SMS-verified) */}
             <div className="relative">
               <Phone className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
               <input
@@ -274,19 +288,55 @@ export function AuthFlow() {
                 autoComplete="tel"
                 value={phoneNumber}
                 onChange={e => setPhoneNumber(e.target.value)}
-                onFocus={() => {
-                  if (!phoneNumber) setPhoneNumber('+');
-                }}
+                onFocus={() => { if (!phoneNumber) setPhoneNumber('+'); }}
                 placeholder="+2519XXXXXXXX"
-                aria-label="Phone number in international format with country code"
-                className="w-full pl-14 pr-4 py-4 text-base rounded-xl bg-white/[0.06] border border-white/10 text-white placeholder:text-slate-300/80 outline-none transition-all focus:border-sky-400/50 focus:bg-white/[0.08] backdrop-blur-sm"
-                onKeyDown={e => e.key === 'Enter' && handlePhoneSubmit()}
+                aria-label="Phone number in international format"
+                className="w-full pl-14 pr-4 py-3.5 text-base rounded-xl bg-white/[0.06] border border-white/10 text-white placeholder:text-slate-300/80 outline-none transition-all focus:border-sky-400/50 focus:bg-white/[0.08] backdrop-blur-sm"
                 disabled={loading}
               />
             </div>
 
-            <p className="text-xs text-slate-500 leading-relaxed">
-              Use the full international format including the "+" symbol and country code. Example: +251912345678
+            {/* Email */}
+            <div className="relative">
+              <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+              <input
+                type="email"
+                inputMode="email"
+                autoComplete="email"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                aria-label="Email address"
+                className="w-full pl-14 pr-4 py-3.5 text-base rounded-xl bg-white/[0.06] border border-white/10 text-white placeholder:text-slate-300/80 outline-none transition-all focus:border-sky-400/50 focus:bg-white/[0.08] backdrop-blur-sm"
+                disabled={loading}
+              />
+            </div>
+
+            {/* Password */}
+            <div className="relative">
+              <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+              <input
+                type={showPassword ? 'text' : 'password'}
+                autoComplete="new-password"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                placeholder="Password (min 8 characters)"
+                aria-label="Password"
+                className="w-full pl-14 pr-12 py-3.5 text-base rounded-xl bg-white/[0.06] border border-white/10 text-white placeholder:text-slate-300/80 outline-none transition-all focus:border-sky-400/50 focus:bg-white/[0.08] backdrop-blur-sm"
+                disabled={loading}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword(s => !s)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200"
+                tabIndex={-1}
+              >
+                {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-500 leading-relaxed pt-1">
+              Your phone number is stored in your profile. Verification is sent to your email, not your phone.
             </p>
 
             {error && (
@@ -297,7 +347,7 @@ export function AuthFlow() {
             )}
 
             <button
-              onClick={handlePhoneSubmit}
+              onClick={handleRegisterSubmit}
               disabled={loading}
               className="w-full flex items-center justify-center gap-2 py-4 rounded-xl font-semibold text-white text-sm transition-all active:scale-95 shadow-lg disabled:opacity-60"
               style={{ background: 'linear-gradient(135deg, #0ea5e9 0%, #14b8a6 100%)', boxShadow: '0 8px 24px -8px rgba(14, 165, 233, 0.6)' }}
@@ -309,7 +359,7 @@ export function AuthFlow() {
                 </>
               ) : (
                 <>
-                  Send Verification Code
+                  Create Account
                   <ChevronRight className="w-5 h-5" />
                 </>
               )}
@@ -336,7 +386,7 @@ export function AuthFlow() {
 
         <div className="relative w-full max-w-sm flex flex-col items-center animate-fade-in-up">
           <button
-            onClick={() => { setAuthStage('phone'); setCode(['', '', '', '', '', '']); setError(''); setInfo(''); }}
+            onClick={() => { setAuthStage('register'); setCode(['', '', '', '', '', '']); setError(''); setInfo(''); }}
             className="self-start mb-6 w-10 h-10 rounded-xl bg-white/[0.06] border border-white/10 flex items-center justify-center text-slate-300 hover:bg-white/10 transition-colors"
           >
             <ArrowLeft className="w-5 h-5" />
@@ -350,9 +400,9 @@ export function AuthFlow() {
             Enter the code
           </h1>
           <p className="text-sm text-slate-400 text-center mb-2 leading-relaxed">
-            We sent a 6-digit code to
+            We sent a 6-digit code to your email
           </p>
-          <p className="text-sm font-semibold text-sky-400 mb-8">{phoneNumber}</p>
+          <p className="text-sm font-semibold text-sky-400 mb-8">{email}</p>
 
           <div className="flex gap-2 mb-6">
             {code.map((digit, i) => (
