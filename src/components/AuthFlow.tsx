@@ -57,6 +57,9 @@ function mapAuthError(error: { message: string }): string {
   if (msg.includes('email provider') || msg.includes('not enabled') || msg.includes('not configured')) {
     return 'Email authentication is not enabled. The Supabase project owner must enable the Email provider in Authentication > Providers.';
   }
+  if (msg.includes('email_not_confirmed')) {
+    return 'Your email is not confirmed yet. Please enter the verification code sent to your email.';
+  }
   if (msg.includes('already registered') || msg.includes('already been registered')) {
     return 'This email is already registered. Try signing in instead.';
   }
@@ -142,10 +145,18 @@ export function AuthFlow() {
     setLoading(true);
     setPhoneNumber(normalizedPhone);
 
-    // Sign up with email + password. Supabase will send a confirmation OTP to the email.
-    const { error: signUpError } = await supabase.auth.signUp({
+    // Sign up with email + password. Supabase will send a confirmation email.
+    // The email will contain either a 6-digit OTP code (if the template uses {{ .Token }})
+    // or a confirmation link (if the template uses {{ .ConfirmationURL }}).
+    // We need the OTP code path, so the email template MUST use {{ .Token }}.
+    const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
       email,
       password,
+      options: {
+        data: {
+          phone: normalizedPhone,
+        },
+      },
     });
 
     setLoading(false);
@@ -155,10 +166,16 @@ export function AuthFlow() {
       return;
     }
 
-    // signUp with email/password sends a confirmation email by default.
-    // The email contains a link or OTP code. We transition to the code screen
-    // so the user can enter the 6-digit code from the email.
-    setInfo('A 6-digit verification code has been sent to your email.');
+    // If Supabase returned a session immediately, email confirmation is disabled.
+    // In that case the user is already authenticated — skip the OTP screen.
+    if (signUpData?.session && signUpData?.user) {
+      setAuthStage('profile');
+      return;
+    }
+
+    // No session returned — Supabase sent a confirmation email with the OTP code.
+    // The user must enter the 6-digit code from the email to verify their account.
+    setInfo('A 6-digit verification code has been sent to your email. Check your inbox (and spam folder).');
     setResendCooldown(60);
     setCode(['', '', '', '', '', '']);
     setAuthStage('code');
@@ -208,7 +225,9 @@ export function AuthFlow() {
       setLoading(true);
       const otpToken = newCode.join('');
 
-      // Verify the email OTP code
+      // Verify the email OTP code using Supabase's signup OTP verification.
+      // The type: 'signup' matches the signUp flow — the code in the email
+      // is a signup confirmation token.
       const { data, error: verifyError } = await supabase.auth.verifyOtp({
         email,
         token: otpToken,
@@ -224,8 +243,16 @@ export function AuthFlow() {
         return;
       }
 
-      if (data?.user) {
+      // verifyOtp returns a session on success — user is now authenticated.
+      // The onAuthStateChange listener in store.tsx will also fire, but we
+      // transition here to ensure the UI moves forward immediately.
+      if (data?.user || data?.session) {
         setAuthStage('profile');
+      } else {
+        // No error but also no session — unexpected state
+        setError('Verification completed but no session was created. Please try again.');
+        setCode(['', '', '', '', '', '']);
+        codeRefs.current[0]?.focus();
       }
     }
   }, [code, email, setAuthStage]);
@@ -402,7 +429,10 @@ export function AuthFlow() {
           <p className="text-sm text-slate-400 text-center mb-2 leading-relaxed">
             We sent a 6-digit code to your email
           </p>
-          <p className="text-sm font-semibold text-sky-400 mb-8">{email}</p>
+          <p className="text-sm font-semibold text-sky-400 mb-2">{email}</p>
+          <p className="text-xs text-slate-500 text-center mb-8 leading-relaxed">
+            Check your inbox and spam folder. The code expires after 10 minutes.
+          </p>
 
           <div className="flex gap-2 mb-6">
             {code.map((digit, i) => (
