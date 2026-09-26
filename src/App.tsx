@@ -11,6 +11,8 @@ import { ProfilePage } from '@/components/ProfilePage';
 import { SpaceView } from '@/components/SpaceView';
 import { MomentsViewer } from '@/components/MomentsViewer';
 import { NavBar } from '@/components/NavBar';
+import { Spinner } from '@/components/ui';
+import { Send } from 'lucide-react';
 
 type View =
   | { type: 'tab' }
@@ -31,6 +33,22 @@ function AppContent() {
     const rgb = hexToRgb(settings.accentColor);
     if (rgb) document.documentElement.style.setProperty('--accent-rgb', rgb);
   }, [settings.darkMode, settings.accentColor]);
+
+  if (authStage === 'loading') {
+    return (
+      <div className="fixed inset-0 max-w-md mx-auto bg-ink-950 flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #0ea5e9 0%, #14b8a6 50%, #10b981 100%)' }}>
+            <Send className="w-7 h-7 text-white -rotate-12" fill="white" />
+          </div>
+          <div className="flex items-center gap-2 text-slate-400">
+            <Spinner size={18} />
+            <span className="text-sm">Loading...</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (authStage !== 'authenticated') {
     return <AuthFlow />;

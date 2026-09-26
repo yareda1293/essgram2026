@@ -14,7 +14,7 @@ import {
 import { generateId } from './utils';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
 
-type AuthStage = 'register' | 'code' | 'profile' | 'authenticated';
+type AuthStage = 'method' | 'phone' | 'email' | 'email_signin' | 'email_signup' | 'code' | 'profile' | 'authenticated' | 'loading';
 
 interface AppState {
   authStage: AuthStage;
@@ -161,7 +161,7 @@ function dbNotificationToNotification(row: any): Notification {
 }
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [authStage, setAuthStage] = useState<AuthStage>('register');
+  const [authStage, setAuthStage] = useState<AuthStage>('loading');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [email, setEmail] = useState('');
   const [currentUserId, setCurrentUserId] = useState(CURRENT_USER_ID);
@@ -202,6 +202,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           const supabaseUserId = session.user.id;
           setCurrentUserId(supabaseUserId);
           if (session.user.email) setEmail(session.user.email);
+          if (session.user.phone) setPhoneNumber(session.user.phone);
           // Check if this user already has a profile in app_users
           const { data: existingUser } = await supabase
             .from('app_users')
@@ -213,9 +214,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
           } else {
             setAuthStage('profile');
           }
+        } else {
+          setAuthStage('method');
         }
       } catch (err) {
         console.warn('Failed to restore Supabase session', err);
+        setAuthStage('method');
       }
     })();
 
@@ -225,7 +229,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       (async () => {
         if (event === 'SIGNED_OUT' || !session?.user) {
           setCurrentUserId(CURRENT_USER_ID);
-          setAuthStage('register');
+          setAuthStage('method');
           setPhoneNumber('');
           setEmail('');
           return;
@@ -412,7 +416,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [currentUserId, phoneNumber, email]);
 
   const signOut = useCallback(() => {
-    setAuthStage('register');
+    setAuthStage('method');
     setPhoneNumber('');
     setEmail('');
     setCurrentUserId(CURRENT_USER_ID);
