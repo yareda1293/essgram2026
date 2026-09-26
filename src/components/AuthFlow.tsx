@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useApp } from '@/store';
 import { supabase } from '@/lib/supabase';
 import { Spinner } from '@/components/ui';
-import { Phone, Mail, Lock, Shield, ChevronRight, Check, ArrowLeft, Camera, Send, AlertCircle, Eye, EyeOff, KeyRound } from 'lucide-react';
+import { Mail, Lock, ChevronRight, Check, ArrowLeft, Camera, Send, AlertCircle, Eye, EyeOff, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/cn';
 
 // ---- Helpers ----
@@ -11,22 +11,12 @@ function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-function normalizePhone(input: string): string {
-  let cleaned = input.replace(/[\s\-()]/g, '');
-  if (!cleaned.startsWith('+')) {
-    if (cleaned.startsWith('00')) {
-      cleaned = '+' + cleaned.slice(2);
-    } else if (cleaned.startsWith('0')) {
-      return input;
-    } else {
-      cleaned = '+' + cleaned;
-    }
-  }
-  return cleaned;
+function sanitizeUsername(input: string): string {
+  return input.toLowerCase().replace(/[^a-z0-9_]/g, '');
 }
 
-function isValidPhone(phone: string): boolean {
-  return /^\+\d{7,15}$/.test(phone);
+function isValidUsername(username: string): boolean {
+  return /^[a-z0-9_]{3,20}$/.test(username);
 }
 
 function mapAuthError(error: { message: string }): string {
@@ -34,26 +24,14 @@ function mapAuthError(error: { message: string }): string {
   if (msg.includes('rate limit') || msg.includes('too many') || msg.includes('over_send') || msg.includes('for security reasons')) {
     return 'Too many requests. Please wait a minute before trying again.';
   }
-  if (msg.includes('invalid') && (msg.includes('otp') || msg.includes('token') || msg.includes('code'))) {
-    return 'The verification code is invalid or has expired. Please request a new code.';
-  }
-  if (msg.includes('expired')) {
-    return 'This code has expired. Please request a new one.';
-  }
-  if (msg.includes('phone') && (msg.includes('not enabled') || msg.includes('not configured') || msg.includes('provider'))) {
-    return 'Phone authentication is not enabled. The Supabase project owner must enable the Phone provider and configure an SMS gateway in Authentication > Providers.';
-  }
-  if (msg.includes('email') && (msg.includes('not enabled') || msg.includes('not configured'))) {
-    return 'Email authentication is not enabled. The Supabase project owner must enable the Email provider in Authentication > Providers.';
+  if (msg.includes('invalid login credentials') || msg.includes('invalid credentials')) {
+    return 'Incorrect email or password. Please try again.';
   }
   if (msg.includes('email_not_confirmed')) {
-    return 'Your email is not confirmed yet. Please enter the verification code sent to your email.';
+    return 'Please check your email to confirm your account before signing in.';
   }
   if (msg.includes('already registered') || msg.includes('already been registered') || msg.includes('user already registered')) {
     return 'This email is already registered. Please sign in instead.';
-  }
-  if (msg.includes('invalid login credentials') || msg.includes('invalid credentials')) {
-    return 'Incorrect email or password. Please try again.';
   }
   if (msg.includes('password') && msg.includes('weak')) {
     return 'Password is too weak. Please use at least 8 characters with a mix of letters and numbers.';
@@ -62,9 +40,28 @@ function mapAuthError(error: { message: string }): string {
     return 'Network error. Please check your internet connection and try again.';
   }
   if (msg.includes('email') && msg.includes('format')) {
-    return 'Invalid email address format.';
+    return 'Please enter a valid email address.';
   }
-  return error.message;
+  if (msg.includes('oauth') || msg.includes('provider')) {
+    return 'Google sign-in is not configured. Please enable Google OAuth in your Supabase project settings.';
+  }
+  if (msg.includes('unique constraint') || msg.includes('duplicate key')) {
+    return 'That username is already taken. Please choose another.';
+  }
+  return 'Something went wrong. Please try again.';
+}
+
+// ---- Google Icon ----
+
+function GoogleIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" width="20" height="20">
+      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+      <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
+      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+    </svg>
+  );
 }
 
 // ---- Shared visual components ----
@@ -119,25 +116,7 @@ function InfoBanner({ info }: { info: string }) {
   );
 }
 
-function PrimaryButton({ onClick, disabled, loading, children }: { onClick: () => void; disabled?: boolean; loading?: boolean; children: React.ReactNode }) {
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      className="w-full flex items-center justify-center gap-2 py-4 rounded-xl font-semibold text-white text-sm transition-all active:scale-95 shadow-lg disabled:opacity-60"
-      style={{ background: 'linear-gradient(135deg, #0ea5e9 0%, #14b8a6 100%)', boxShadow: '0 8px 24px -8px rgba(14, 165, 233, 0.6)' }}
-    >
-      {loading ? (
-        <>
-          <Spinner size={20} />
-          <span>Please wait...</span>
-        </>
-      ) : (
-        children
-      )}
-    </button>
-  );
-}
+const inputClass = 'w-full pl-14 pr-4 py-3.5 text-base rounded-xl bg-white/[0.06] border border-white/10 text-white placeholder:text-slate-300/80 outline-none transition-all focus:border-sky-400/50 focus:bg-white/[0.08] backdrop-blur-sm';
 
 function BackButton({ onClick }: { onClick: () => void }) {
   return (
@@ -150,32 +129,38 @@ function BackButton({ onClick }: { onClick: () => void }) {
   );
 }
 
-const inputClass = 'w-full pl-14 pr-4 py-3.5 text-base rounded-xl bg-white/[0.06] border border-white/10 text-white placeholder:text-slate-300/80 outline-none transition-all focus:border-sky-400/50 focus:bg-white/[0.08] backdrop-blur-sm';
+function Divider() {
+  return (
+    <div className="flex items-center gap-3 py-2">
+      <div className="flex-1 h-px bg-white/10" />
+      <span className="text-xs text-slate-500 font-medium uppercase tracking-wider">or</span>
+      <div className="flex-1 h-px bg-white/10" />
+    </div>
+  );
+}
 
 // ---- Main component ----
 
 export function AuthFlow() {
-  const { authStage, setAuthStage, phoneNumber, setPhoneNumber, email, setEmail, completeProfile, signOut } = useApp();
+  const { authStage, setAuthStage, email, setEmail, completeProfile, signOut } = useApp();
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [code, setCode] = useState(['', '', '', '', '', '']);
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
-  const [resendCooldown, setResendCooldown] = useState(0);
-  const codeRefs = useRef<(HTMLInputElement | null)[]>([]);
-
-  // OTP context: 'email_signup' | 'phone'
-  const [otpContext, setOtpContext] = useState<'email_signup' | 'phone'>('email_signup');
 
   // Profile setup
   const [fullName, setFullName] = useState('');
   const [username, setUsername] = useState('');
   const [bio, setBio] = useState('');
-  const [status, setStatus] = useState('');
   const [photoUrl, setPhotoUrl] = useState('');
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Username check state
+  const [usernameStatus, setUsernameStatus] = useState<'idle' | 'checking' | 'available' | 'taken'>('idle');
+  const usernameCheckTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -194,22 +179,71 @@ export function AuthFlow() {
     reader.readAsDataURL(file);
   };
 
+  // ---- Username availability check (debounced) ----
   useEffect(() => {
-    if (authStage === 'code' && codeRefs.current[0]) {
-      setTimeout(() => codeRefs.current[0]?.focus(), 300);
+    if (!isValidUsername(username)) {
+      setUsernameStatus('idle');
+      return;
     }
-  }, [authStage]);
+    setUsernameStatus('checking');
+    if (usernameCheckTimer.current) clearTimeout(usernameCheckTimer.current);
+    usernameCheckTimer.current = setTimeout(async () => {
+      try {
+        const { data } = await supabase
+          .from('app_users')
+          .select('id')
+          .eq('username', username)
+          .maybeSingle();
+        setUsernameStatus(data ? 'taken' : 'available');
+      } catch {
+        setUsernameStatus('idle');
+      }
+    }, 500);
+    return () => {
+      if (usernameCheckTimer.current) clearTimeout(usernameCheckTimer.current);
+    };
+  }, [username]);
 
-  useEffect(() => {
-    if (resendCooldown <= 0) return;
-    const timer = setTimeout(() => setResendCooldown(c => c - 1), 1000);
-    return () => clearTimeout(timer);
-  }, [resendCooldown]);
-
-  const resetCode = () => {
-    setCode(['', '', '', '', '', '']);
+  // ---- Google OAuth ----
+  const handleGoogleSignIn = useCallback(async () => {
     setError('');
-  };
+    setGoogleLoading(true);
+
+    const { error: oauthError } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: `${window.location.origin}/`,
+      },
+    });
+
+    if (oauthError) {
+      setGoogleLoading(false);
+      setError(mapAuthError(oauthError));
+      return;
+    }
+
+    // Browser redirects to Google — no further UI needed here.
+    // The OAuth callback will trigger onAuthStateChange in store.tsx.
+  }, []);
+
+  // ---- Email Continue (check if account exists via signIn attempt) ----
+  const handleEmailContinue = useCallback(async () => {
+    if (!isValidEmail(email)) {
+      setError('Please enter a valid email address.');
+      return;
+    }
+
+    setError('');
+    setLoading(true);
+
+    // Try signing in with a dummy password to detect if the email exists.
+    // Supabase returns "Invalid login credentials" regardless of whether
+    // the email exists or the password is wrong — this is by design for security.
+    // So instead, we just go to the password screen and let the user choose
+    // sign-in or sign-up. The email field is pre-filled.
+    setLoading(false);
+    setAuthStage('email_password');
+  }, [email, setAuthStage]);
 
   // ---- Email sign in ----
   const handleEmailSignIn = useCallback(async () => {
@@ -238,7 +272,7 @@ export function AuthFlow() {
       return;
     }
 
-    // onAuthStateChange in store.tsx will handle the stage transition
+    // onAuthStateChange in store.tsx handles the stage transition
   }, [email, password]);
 
   // ---- Email sign up ----
@@ -278,151 +312,14 @@ export function AuthFlow() {
       return;
     }
 
-    // Confirmation email sent — go to code screen
-    setOtpContext('email_signup');
-    setInfo('A 6-digit verification code has been sent to your email. Check your inbox (and spam folder).');
-    setResendCooldown(60);
-    resetCode();
-    setAuthStage('code');
+    // Email confirmation required — show message
+    setInfo('Account created! Please check your email to confirm your account, then come back to sign in.');
   }, [email, password, confirmPassword, setAuthStage]);
-
-  // ---- Phone OTP send ----
-  const handlePhoneSendOtp = useCallback(async () => {
-    const normalizedPhone = normalizePhone(phoneNumber);
-
-    if (!isValidPhone(normalizedPhone)) {
-      setError('Please enter a valid phone number in international format, e.g. +2519XXXXXXXX');
-      return;
-    }
-
-    setError('');
-    setInfo('');
-    setLoading(true);
-    setPhoneNumber(normalizedPhone);
-
-    const { error: otpError } = await supabase.auth.signInWithOtp({
-      phone: normalizedPhone,
-    });
-
-    setLoading(false);
-
-    if (otpError) {
-      setError(mapAuthError(otpError));
-      return;
-    }
-
-    setOtpContext('phone');
-    setInfo(`A 6-digit code has been sent to ${normalizedPhone} via SMS.`);
-    setResendCooldown(60);
-    resetCode();
-    setAuthStage('code');
-  }, [phoneNumber, setAuthStage, setPhoneNumber]);
-
-  // ---- Resend OTP ----
-  const handleResend = useCallback(async () => {
-    if (resendCooldown > 0 || loading) return;
-
-    setError('');
-    setInfo('');
-    setLoading(true);
-
-    if (otpContext === 'phone') {
-      const { error: resendError } = await supabase.auth.signInWithOtp({
-        phone: normalizePhone(phoneNumber),
-      });
-      setLoading(false);
-      if (resendError) {
-        setError(mapAuthError(resendError));
-        return;
-      }
-      setInfo(`A new code has been sent to ${normalizePhone(phoneNumber)} via SMS.`);
-    } else {
-      const { error: resendError } = await supabase.auth.resend({
-        type: 'signup',
-        email,
-      });
-      setLoading(false);
-      if (resendError) {
-        setError(mapAuthError(resendError));
-        return;
-      }
-      setInfo('A new code has been sent to your email.');
-    }
-
-    setResendCooldown(60);
-    resetCode();
-    codeRefs.current[0]?.focus();
-  }, [otpContext, phoneNumber, email, resendCooldown, loading]);
-
-  // ---- Verify OTP ----
-  const handleCodeChange = useCallback(async (index: number, value: string) => {
-    if (!/^\d?$/.test(value)) return;
-    const newCode = [...code];
-    newCode[index] = value;
-    setCode(newCode);
-    setError('');
-    setInfo('');
-
-    if (value && index < 5) {
-      codeRefs.current[index + 1]?.focus();
-    }
-
-    if (newCode.every(d => d !== '')) {
-      setLoading(true);
-      const otpToken = newCode.join('');
-
-      let verifyError: { message: string } | null = null;
-      let verifyData: any = null;
-
-      if (otpContext === 'phone') {
-        const result = await supabase.auth.verifyOtp({
-          phone: normalizePhone(phoneNumber),
-          token: otpToken,
-          type: 'sms',
-        });
-        verifyError = result.error;
-        verifyData = result.data;
-      } else {
-        const result = await supabase.auth.verifyOtp({
-          email,
-          token: otpToken,
-          type: 'signup',
-        });
-        verifyError = result.error;
-        verifyData = result.data;
-      }
-
-      setLoading(false);
-
-      if (verifyError) {
-        setError(mapAuthError(verifyError));
-        resetCode();
-        codeRefs.current[0]?.focus();
-        return;
-      }
-
-      if (verifyData?.user || verifyData?.session) {
-        // onAuthStateChange will check if profile exists and set the right stage.
-        // But we also set it here for immediate UI feedback.
-        setAuthStage('profile');
-      } else {
-        setError('Verification completed but no session was created. Please try again.');
-        resetCode();
-        codeRefs.current[0]?.focus();
-      }
-    }
-  }, [code, otpContext, phoneNumber, email, setAuthStage]);
-
-  const handleCodeKeyDown = (index: number, e: React.KeyboardEvent) => {
-    if (e.key === 'Backspace' && !code[index] && index > 0) {
-      codeRefs.current[index - 1]?.focus();
-    }
-  };
 
   // ---- Forgot password ----
   const handleForgotPassword = useCallback(async () => {
     if (!isValidEmail(email)) {
-      setError('Please enter your email address first.');
+      setError('Please enter your email address.');
       return;
     }
 
@@ -430,7 +327,9 @@ export function AuthFlow() {
     setInfo('');
     setLoading(true);
 
-    const { error: resetError } = await supabase.auth.resetPasswordForEmail(email);
+    const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/`,
+    });
 
     setLoading(false);
 
@@ -444,26 +343,36 @@ export function AuthFlow() {
 
   // ---- Profile submit ----
   const handleProfileSubmit = useCallback(() => {
-    if (!fullName.trim() || !username.trim()) {
-      setError('Please enter your name and username');
+    if (!fullName.trim()) {
+      setError('Please enter your full name.');
+      return;
+    }
+    if (!isValidUsername(username)) {
+      setError('Username must be 3-20 characters: lowercase letters, numbers, and underscores only.');
+      return;
+    }
+    if (usernameStatus === 'taken') {
+      setError('That username is already taken. Please choose another.');
+      return;
+    }
+    if (usernameStatus !== 'available') {
+      setError('Please wait for username availability to be checked.');
       return;
     }
     setError('');
     setLoading(true);
     completeProfile({
       name: fullName,
-      username: '@' + username.replace('@', ''),
+      username: username,
       bio,
-      status,
       avatar: photoUrl,
-      phone: phoneNumber,
     });
-  }, [fullName, username, bio, status, photoUrl, phoneNumber, completeProfile]);
+  }, [fullName, username, usernameStatus, bio, photoUrl, completeProfile]);
 
   // ============ SCREENS ============
 
-  // ---- Method chooser ----
-  if (authStage === 'method') {
+  // ---- Login (main screen) ----
+  if (authStage === 'login') {
     return (
       <div className="min-h-screen relative flex flex-col items-center justify-center px-6 safe-top safe-bottom overflow-hidden">
         <AuthBackground />
@@ -474,32 +383,66 @@ export function AuthFlow() {
           <h1 className="font-display text-3xl font-bold text-white mb-2 text-center tracking-tight">
             Ess Gram
           </h1>
-          <p className="text-sky-200/80 text-center mb-1 font-medium">Your people. Your space.</p>
-          <p className="text-sm text-slate-400 text-center mb-10 leading-relaxed">
-            Sign in or create an account to get started.
-          </p>
+          <p className="text-sky-200/80 text-center mb-10 font-medium">Your people. Your space.</p>
 
-          <div className="w-full space-y-3">
+          <div className="w-full space-y-4">
+            {/* Google button */}
             <button
-              onClick={() => { setError(''); setAuthStage('phone'); }}
-              className="w-full flex items-center gap-4 py-4 px-5 rounded-xl bg-white/[0.06] border border-white/10 text-white font-medium text-sm transition-all hover:bg-white/[0.1] hover:border-sky-400/30 active:scale-95"
+              onClick={handleGoogleSignIn}
+              disabled={googleLoading}
+              className="w-full flex items-center justify-center gap-3 py-3.5 rounded-xl bg-white text-gray-700 font-semibold text-sm transition-all hover:bg-gray-50 active:scale-95 shadow-lg disabled:opacity-60"
             >
-              <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(14, 165, 233, 0.15)' }}>
-                <Phone className="w-5 h-5 text-sky-400" />
-              </div>
-              <span className="flex-1 text-left">Continue with Phone</span>
-              <ChevronRight className="w-5 h-5 text-slate-500" />
+              {googleLoading ? (
+                <>
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  <span>Connecting to Google...</span>
+                </>
+              ) : (
+                <>
+                  <GoogleIcon />
+                  <span>Continue with Google</span>
+                </>
+              )}
             </button>
 
+            <Divider />
+
+            {/* Email input */}
+            <div className="relative">
+              <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+              <input
+                type="email"
+                inputMode="email"
+                autoComplete="email"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                placeholder="Email address"
+                aria-label="Email address"
+                className={inputClass}
+                disabled={loading || googleLoading}
+                onKeyDown={e => { if (e.key === 'Enter') handleEmailContinue(); }}
+              />
+            </div>
+
+            <ErrorBanner error={error} />
+
             <button
-              onClick={() => { setError(''); setAuthStage('email'); }}
-              className="w-full flex items-center gap-4 py-4 px-5 rounded-xl bg-white/[0.06] border border-white/10 text-white font-medium text-sm transition-all hover:bg-white/[0.1] hover:border-sky-400/30 active:scale-95"
+              onClick={handleEmailContinue}
+              disabled={loading || googleLoading || !email}
+              className="w-full flex items-center justify-center gap-2 py-4 rounded-xl font-semibold text-white text-sm transition-all active:scale-95 shadow-lg disabled:opacity-60"
+              style={{ background: 'linear-gradient(135deg, #0ea5e9 0%, #14b8a6 100%)', boxShadow: '0 8px 24px -8px rgba(14, 165, 233, 0.6)' }}
             >
-              <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(20, 184, 166, 0.15)' }}>
-                <Mail className="w-5 h-5 text-teal-400" />
-              </div>
-              <span className="flex-1 text-left">Continue with Email</span>
-              <ChevronRight className="w-5 h-5 text-slate-500" />
+              {loading ? (
+                <>
+                  <Spinner size={20} />
+                  <span>Please wait...</span>
+                </>
+              ) : (
+                <>
+                  Continue
+                  <ChevronRight className="w-5 h-5" />
+                </>
+              )}
             </button>
           </div>
 
@@ -511,115 +454,19 @@ export function AuthFlow() {
     );
   }
 
-  // ---- Phone number entry ----
-  if (authStage === 'phone') {
-    return (
-      <div className="min-h-screen relative flex flex-col items-center justify-center px-6 safe-top safe-bottom overflow-hidden">
-        <AuthBackground />
-        <div className="relative w-full max-w-sm flex flex-col items-center animate-fade-in-up">
-          <BackButton onClick={() => { setError(''); setAuthStage('method'); }} />
-
-          <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-6" style={{ background: 'rgba(14, 165, 233, 0.15)' }}>
-            <Phone className="w-8 h-8 text-sky-400" />
-          </div>
-
-          <h1 className="font-display text-2xl font-bold text-white mb-2 text-center">
-            Enter your phone number
-          </h1>
-          <p className="text-sm text-slate-400 text-center mb-8 leading-relaxed">
-            We'll send you a 6-digit verification code via SMS.
-          </p>
-
-          <div className="w-full space-y-4">
-            <div className="relative">
-              <Phone className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-              <input
-                type="tel"
-                inputMode="tel"
-                autoComplete="tel"
-                value={phoneNumber}
-                onChange={e => setPhoneNumber(e.target.value)}
-                onFocus={() => { if (!phoneNumber) setPhoneNumber('+'); }}
-                placeholder="+2519XXXXXXXX"
-                aria-label="Phone number in international format"
-                className={inputClass}
-                disabled={loading}
-                onKeyDown={e => { if (e.key === 'Enter') handlePhoneSendOtp(); }}
-              />
-            </div>
-
-            <ErrorBanner error={error} />
-            <InfoBanner info={info} />
-
-            <PrimaryButton onClick={handlePhoneSendOtp} disabled={loading || !phoneNumber}>
-              {loading ? 'Sending code...' : (<><Send className="w-5 h-5" /> Send Code</>)}
-            </PrimaryButton>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ---- Email: Sign in / Create account ----
-  if (authStage === 'email') {
-    return (
-      <div className="min-h-screen relative flex flex-col items-center justify-center px-6 safe-top safe-bottom overflow-hidden">
-        <AuthBackground />
-        <div className="relative w-full max-w-sm flex flex-col items-center animate-fade-in-up">
-          <BackButton onClick={() => { setError(''); setPassword(''); setConfirmPassword(''); setAuthStage('method'); }} />
-
-          <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-6" style={{ background: 'rgba(20, 184, 166, 0.15)' }}>
-            <Mail className="w-8 h-8 text-teal-400" />
-          </div>
-
-          <h1 className="font-display text-2xl font-bold text-white mb-2 text-center">
-            Continue with Email
-          </h1>
-          <p className="text-sm text-slate-400 text-center mb-8 leading-relaxed">
-            Sign in to your account or create a new one.
-          </p>
-
-          <div className="w-full space-y-3">
-            <button
-              onClick={() => { setError(''); setPassword(''); setAuthStage('email_signin'); }}
-              className="w-full flex items-center gap-4 py-4 px-5 rounded-xl bg-white/[0.06] border border-white/10 text-white font-medium text-sm transition-all hover:bg-white/[0.1] hover:border-sky-400/30 active:scale-95"
-            >
-              <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(14, 165, 233, 0.15)' }}>
-                <Lock className="w-5 h-5 text-sky-400" />
-              </div>
-              <span className="flex-1 text-left">Sign In</span>
-              <ChevronRight className="w-5 h-5 text-slate-500" />
-            </button>
-
-            <button
-              onClick={() => { setError(''); setPassword(''); setConfirmPassword(''); setAuthStage('email_signup'); }}
-              className="w-full flex items-center gap-4 py-4 px-5 rounded-xl bg-white/[0.06] border border-white/10 text-white font-medium text-sm transition-all hover:bg-white/[0.1] hover:border-sky-400/30 active:scale-95"
-            >
-              <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(16, 185, 129, 0.15)' }}>
-                <Mail className="w-5 h-5 text-emerald-400" />
-              </div>
-              <span className="flex-1 text-left">Create Account</span>
-              <ChevronRight className="w-5 h-5 text-slate-500" />
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ---- Email sign in ----
-  if (authStage === 'email_signin') {
+  // ---- Email password (sign in or sign up) ----
+  if (authStage === 'email_password') {
     return (
       <div className="min-h-screen relative flex flex-col items-center justify-center px-6 safe-top safe-bottom overflow-y-auto">
         <AuthBackground />
         <div className="relative w-full max-w-sm flex flex-col items-center py-8 animate-fade-in-up">
-          <BackButton onClick={() => { setError(''); setAuthStage('email'); }} />
+          <BackButton onClick={() => { setError(''); setPassword(''); setInfo(''); setAuthStage('login'); }} />
 
           <h1 className="font-display text-2xl font-bold text-white mb-2 text-center">
-            Sign In
+            Welcome back
           </h1>
           <p className="text-sm text-slate-400 text-center mb-8 leading-relaxed">
-            Enter your email and password to continue.
+            Sign in to your account or create a new one.
           </p>
 
           <div className="w-full space-y-4">
@@ -662,7 +509,7 @@ export function AuthFlow() {
             </div>
 
             <button
-              onClick={handleForgotPassword}
+              onClick={() => { setError(''); setInfo(''); setAuthStage('forgot_password'); }}
               disabled={loading}
               className="text-sm text-slate-400 hover:text-sky-400 transition-colors self-start"
             >
@@ -672,14 +519,29 @@ export function AuthFlow() {
             <ErrorBanner error={error} />
             <InfoBanner info={info} />
 
-            <PrimaryButton onClick={handleEmailSignIn} disabled={loading || !email || !password}>
-              {loading ? 'Signing in...' : (<>Sign In <ChevronRight className="w-5 h-5" /></>)}
-            </PrimaryButton>
+            <button
+              onClick={handleEmailSignIn}
+              disabled={loading || !email || !password}
+              className="w-full flex items-center justify-center gap-2 py-4 rounded-xl font-semibold text-white text-sm transition-all active:scale-95 shadow-lg disabled:opacity-60"
+              style={{ background: 'linear-gradient(135deg, #0ea5e9 0%, #14b8a6 100%)', boxShadow: '0 8px 24px -8px rgba(14, 165, 233, 0.6)' }}
+            >
+              {loading ? (
+                <>
+                  <Spinner size={20} />
+                  <span>Signing in...</span>
+                </>
+              ) : (
+                <>
+                  Sign In
+                  <ChevronRight className="w-5 h-5" />
+                </>
+              )}
+            </button>
 
             <p className="text-sm text-slate-500 text-center pt-2">
               Don't have an account?{' '}
               <button
-                onClick={() => { setError(''); setPassword(''); setConfirmPassword(''); setAuthStage('email_signup'); }}
+                onClick={() => { setError(''); setPassword(''); setConfirmPassword(''); setInfo(''); setAuthStage('email_signup'); }}
                 className="text-sky-400 hover:text-sky-300 font-medium"
               >
                 Create one
@@ -697,13 +559,13 @@ export function AuthFlow() {
       <div className="min-h-screen relative flex flex-col items-center justify-center px-6 safe-top safe-bottom overflow-y-auto">
         <AuthBackground />
         <div className="relative w-full max-w-sm flex flex-col items-center py-8 animate-fade-in-up">
-          <BackButton onClick={() => { setError(''); setPassword(''); setConfirmPassword(''); setAuthStage('email'); }} />
+          <BackButton onClick={() => { setError(''); setPassword(''); setConfirmPassword(''); setInfo(''); setAuthStage('email_password'); }} />
 
           <h1 className="font-display text-2xl font-bold text-white mb-2 text-center">
             Create Account
           </h1>
           <p className="text-sm text-slate-400 text-center mb-8 leading-relaxed">
-            We'll send a verification code to your email.
+            Enter your email and choose a password.
           </p>
 
           <div className="w-full space-y-4">
@@ -762,14 +624,29 @@ export function AuthFlow() {
             <ErrorBanner error={error} />
             <InfoBanner info={info} />
 
-            <PrimaryButton onClick={handleEmailSignUp} disabled={loading || !email || !password || !confirmPassword}>
-              {loading ? 'Creating account...' : (<>Create Account <ChevronRight className="w-5 h-5" /></>)}
-            </PrimaryButton>
+            <button
+              onClick={handleEmailSignUp}
+              disabled={loading || !email || !password || !confirmPassword}
+              className="w-full flex items-center justify-center gap-2 py-4 rounded-xl font-semibold text-white text-sm transition-all active:scale-95 shadow-lg disabled:opacity-60"
+              style={{ background: 'linear-gradient(135deg, #0ea5e9 0%, #14b8a6 100%)', boxShadow: '0 8px 24px -8px rgba(14, 165, 233, 0.6)' }}
+            >
+              {loading ? (
+                <>
+                  <Spinner size={20} />
+                  <span>Creating account...</span>
+                </>
+              ) : (
+                <>
+                  Create Account
+                  <ChevronRight className="w-5 h-5" />
+                </>
+              )}
+            </button>
 
             <p className="text-sm text-slate-500 text-center pt-2">
               Already have an account?{' '}
               <button
-                onClick={() => { setError(''); setPassword(''); setConfirmPassword(''); setAuthStage('email_signin'); }}
+                onClick={() => { setError(''); setPassword(''); setConfirmPassword(''); setInfo(''); setAuthStage('email_password'); }}
                 className="text-sky-400 hover:text-sky-300 font-medium"
               >
                 Sign in
@@ -781,89 +658,67 @@ export function AuthFlow() {
     );
   }
 
-  // ---- Code verification (shared for phone SMS and email signup OTP) ----
-  if (authStage === 'code') {
-    const target = otpContext === 'phone' ? normalizePhone(phoneNumber) : email;
-    const targetLabel = otpContext === 'phone' ? 'phone number' : 'email';
-
+  // ---- Forgot password ----
+  if (authStage === 'forgot_password') {
     return (
-      <div className="min-h-screen relative flex flex-col items-center justify-center px-6 safe-top safe-bottom overflow-hidden">
+      <div className="min-h-screen relative flex flex-col items-center justify-center px-6 safe-top safe-bottom overflow-y-auto">
         <AuthBackground />
-        <div className="relative w-full max-w-sm flex flex-col items-center animate-fade-in-up">
-          <BackButton onClick={() => {
-            resetCode();
-            setInfo('');
-            setAuthStage(otpContext === 'phone' ? 'phone' : 'email_signup');
-          }} />
-
-          <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-6" style={{ background: 'rgba(14, 165, 233, 0.15)' }}>
-            <Shield className="w-8 h-8 text-sky-400" />
-          </div>
+        <div className="relative w-full max-w-sm flex flex-col items-center py-8 animate-fade-in-up">
+          <BackButton onClick={() => { setError(''); setInfo(''); setAuthStage('email_password'); }} />
 
           <h1 className="font-display text-2xl font-bold text-white mb-2 text-center">
-            Enter the code
+            Reset Password
           </h1>
-          <p className="text-sm text-slate-400 text-center mb-2 leading-relaxed">
-            We sent a 6-digit code to your {targetLabel}
-          </p>
-          <p className="text-sm font-semibold text-sky-400 mb-2">{target}</p>
-          <p className="text-xs text-slate-500 text-center mb-8 leading-relaxed">
-            Check your {otpContext === 'phone' ? 'SMS messages' : 'inbox and spam folder'}. The code expires after 10 minutes.
+          <p className="text-sm text-slate-400 text-center mb-8 leading-relaxed">
+            Enter your email and we'll send you a link to reset your password.
           </p>
 
-          <div className="flex gap-2 mb-6">
-            {code.map((digit, i) => (
+          <div className="w-full space-y-4">
+            <div className="relative">
+              <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
               <input
-                key={i}
-                ref={el => { codeRefs.current[i] = el; }}
-                type="text"
-                inputMode="numeric"
-                maxLength={1}
-                value={digit}
-                onChange={e => handleCodeChange(i, e.target.value)}
-                onKeyDown={e => handleCodeKeyDown(i, e)}
+                type="email"
+                inputMode="email"
+                autoComplete="email"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                aria-label="Email address"
+                className={inputClass}
                 disabled={loading}
-                className={cn(
-                  'w-12 h-14 rounded-xl text-center text-xl font-bold transition-all',
-                  digit
-                    ? 'border-2 text-white'
-                    : 'bg-white/[0.06] border border-white/10 text-white outline-none'
-                )}
-                style={digit ? { background: 'rgba(14, 165, 233, 0.15)', borderColor: 'rgba(14, 165, 233, 0.5)' } : {}}
+                onKeyDown={e => { if (e.key === 'Enter') handleForgotPassword(); }}
               />
-            ))}
+            </div>
+
+            <ErrorBanner error={error} />
+            <InfoBanner info={info} />
+
+            <button
+              onClick={handleForgotPassword}
+              disabled={loading || !email}
+              className="w-full flex items-center justify-center gap-2 py-4 rounded-xl font-semibold text-white text-sm transition-all active:scale-95 shadow-lg disabled:opacity-60"
+              style={{ background: 'linear-gradient(135deg, #0ea5e9 0%, #14b8a6 100%)', boxShadow: '0 8px 24px -8px rgba(14, 165, 233, 0.6)' }}
+            >
+              {loading ? (
+                <>
+                  <Spinner size={20} />
+                  <span>Sending...</span>
+                </>
+              ) : (
+                <>
+                  Send Reset Link
+                  <ChevronRight className="w-5 h-5" />
+                </>
+              )}
+            </button>
+
+            <button
+              onClick={() => { setError(''); setInfo(''); setAuthStage('email_password'); }}
+              className="w-full text-sm text-slate-400 hover:text-sky-400 transition-colors text-center pt-2"
+            >
+              Back to Sign In
+            </button>
           </div>
-
-          <ErrorBanner error={error} />
-
-          {info && !error && (
-            <div className="flex items-start gap-2 p-3 rounded-xl bg-sky-500/10 border border-sky-500/20 mb-4 max-w-sm">
-              <Check className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
-              <p className="text-sm text-sky-300 leading-relaxed">{info}</p>
-            </div>
-          )}
-
-          {loading && (
-            <div className="flex items-center gap-2 text-sky-400 mb-4">
-              <Spinner size={20} />
-              <span className="text-sm">Verifying code...</span>
-            </div>
-          )}
-
-          <button
-            onClick={handleResend}
-            disabled={resendCooldown > 0 || loading}
-            className={cn(
-              'text-sm transition-colors mt-2',
-              resendCooldown > 0 || loading
-                ? 'text-slate-600 cursor-not-allowed'
-                : 'text-slate-400 hover:text-sky-400'
-            )}
-          >
-            {resendCooldown > 0
-              ? `Resend code in ${resendCooldown}s`
-              : "Didn't receive a code? Resend"}
-          </button>
         </div>
       </div>
     );
@@ -882,9 +737,9 @@ export function AuthFlow() {
                 setFullName('');
                 setUsername('');
                 setBio('');
-                setStatus('');
                 setPhotoUrl('');
                 setError('');
+                setUsernameStatus('idle');
               }}
               className="w-10 h-10 rounded-xl bg-white/[0.06] border border-white/10 flex items-center justify-center text-slate-300 hover:bg-white/10 transition-colors"
             >
@@ -895,12 +750,13 @@ export function AuthFlow() {
           </div>
 
           <h1 className="font-display text-2xl font-bold text-white mb-1 text-center">
-            Set up your profile
+            Create your profile
           </h1>
           <p className="text-sm text-slate-400 text-center mb-8">
             Tell the Ess Gram community who you are.
           </p>
 
+          {/* Photo upload */}
           <div className="flex justify-center mb-8">
             <input
               ref={fileInputRef}
@@ -945,11 +801,36 @@ export function AuthFlow() {
                 <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-medium">@</span>
                 <input
                   value={username}
-                  onChange={e => setUsername(e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
+                  onChange={e => setUsername(sanitizeUsername(e.target.value))}
                   placeholder="alexrivera"
-                  className="w-full pl-8 pr-4 py-3.5 rounded-xl bg-white/[0.06] border border-white/10 text-white placeholder:text-slate-500 outline-none transition-all focus:border-sky-400/50 focus:bg-white/[0.08]"
+                  className={cn(
+                    'w-full pl-8 pr-10 py-3.5 rounded-xl bg-white/[0.06] border text-white placeholder:text-slate-500 outline-none transition-all focus:bg-white/[0.08]',
+                    usernameStatus === 'available'
+                      ? 'border-emerald-500/40 focus:border-emerald-400/60'
+                      : usernameStatus === 'taken'
+                      ? 'border-red-500/40 focus:border-red-400/60'
+                      : 'border-white/10 focus:border-sky-400/50'
+                  )}
                 />
+                {usernameStatus === 'checking' && (
+                  <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 animate-spin" />
+                )}
+                {usernameStatus === 'available' && (
+                  <Check className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-400" />
+                )}
+                {usernameStatus === 'taken' && (
+                  <AlertCircle className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-red-400" />
+                )}
               </div>
+              {username && !isValidUsername(username) && (
+                <p className="text-xs text-slate-500 mt-1">3-20 characters: lowercase letters, numbers, underscores</p>
+              )}
+              {usernameStatus === 'available' && (
+                <p className="text-xs text-emerald-400 mt-1">Username available</p>
+              )}
+              {usernameStatus === 'taken' && (
+                <p className="text-xs text-red-400 mt-1">Username already taken</p>
+              )}
             </div>
 
             <div>
@@ -965,27 +846,17 @@ export function AuthFlow() {
               <p className="text-2xs text-slate-500 mt-1 text-right">{bio.length}/120</p>
             </div>
 
-            <div>
-              <label className="text-xs font-medium text-slate-400 mb-1.5 block">Status (optional)</label>
-              <input
-                value={status}
-                onChange={e => setStatus(e.target.value)}
-                placeholder="Available"
-                className="w-full px-4 py-3.5 rounded-xl bg-white/[0.06] border border-white/10 text-white placeholder:text-slate-500 outline-none transition-all focus:border-sky-400/50 focus:bg-white/[0.08]"
-              />
-            </div>
-
-            {error && <p className="text-sm text-red-400">{error}</p>}
+            {error && <ErrorBanner error={error} />}
 
             <button
               onClick={handleProfileSubmit}
-              disabled={loading}
+              disabled={loading || !fullName.trim() || !isValidUsername(username) || usernameStatus !== 'available'}
               className="w-full flex items-center justify-center gap-2 py-4 rounded-xl font-semibold text-white text-sm transition-all active:scale-95 shadow-lg mt-2 disabled:opacity-60"
               style={{ background: 'linear-gradient(135deg, #0ea5e9 0%, #14b8a6 100%)', boxShadow: '0 8px 24px -8px rgba(14, 165, 233, 0.6)' }}
             >
               {loading ? <Spinner size={20} /> : (
                 <>
-                  Start Messaging
+                  Create Account
                   <ChevronRight className="w-5 h-5" />
                 </>
               )}

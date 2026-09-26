@@ -14,16 +14,14 @@ import {
 import { generateId } from './utils';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
 
-type AuthStage = 'method' | 'phone' | 'email' | 'email_signin' | 'email_signup' | 'code' | 'profile' | 'authenticated' | 'loading';
+type AuthStage = 'loading' | 'login' | 'email_password' | 'email_signup' | 'forgot_password' | 'profile' | 'authenticated';
 
 interface AppState {
   authStage: AuthStage;
-  phoneNumber: string;
   email: string;
   currentUserId: string;
   currentUser: User;
   setAuthStage: (s: AuthStage) => void;
-  setPhoneNumber: (p: string) => void;
   setEmail: (e: string) => void;
   completeProfile: (data: Partial<User>) => void;
   signOut: () => void;
@@ -162,7 +160,6 @@ function dbNotificationToNotification(row: any): Notification {
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [authStage, setAuthStage] = useState<AuthStage>('loading');
-  const [phoneNumber, setPhoneNumber] = useState('');
   const [email, setEmail] = useState('');
   const [currentUserId, setCurrentUserId] = useState(CURRENT_USER_ID);
   const [activeTab, setActiveTab] = useState<TabKey>('chats');
@@ -202,11 +199,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
           const supabaseUserId = session.user.id;
           setCurrentUserId(supabaseUserId);
           if (session.user.email) setEmail(session.user.email);
-          if (session.user.phone) setPhoneNumber(session.user.phone);
-          // Check if this user already has a profile in app_users
           const { data: existingUser } = await supabase
             .from('app_users')
-            .select('id, phone, email')
+            .select('id, username')
             .eq('id', supabaseUserId)
             .maybeSingle();
           if (existingUser) {
@@ -215,11 +210,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
             setAuthStage('profile');
           }
         } else {
-          setAuthStage('method');
+          setAuthStage('login');
         }
       } catch (err) {
         console.warn('Failed to restore Supabase session', err);
-        setAuthStage('method');
+        setAuthStage('login');
       }
     })();
 
@@ -229,8 +224,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       (async () => {
         if (event === 'SIGNED_OUT' || !session?.user) {
           setCurrentUserId(CURRENT_USER_ID);
-          setAuthStage('method');
-          setPhoneNumber('');
+          setAuthStage('login');
           setEmail('');
           return;
         }
@@ -243,11 +237,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
           try {
             const { data: existingUser } = await supabase
               .from('app_users')
-              .select('id')
+              .select('id, username')
               .eq('id', supabaseUserId)
               .maybeSingle();
             if (existingUser) {
               setAuthStage('authenticated');
+            } else {
+              setAuthStage('profile');
             }
           } catch {
             // If the query fails, leave the current stage as-is
@@ -387,8 +383,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const currentUser = users.find(u => u.id === currentUserId) || users[0];
 
   const completeProfile = useCallback((data: Partial<User>) => {
-    setAuthStage('authenticated');
-    if (!isSupabaseConfigured) return;
+    if (!isSupabaseConfigured) {
+      setAuthStage('authenticated');
+      return;
+    }
     (async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
@@ -396,11 +394,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (session?.user?.id) {
           setCurrentUserId(session.user.id);
         }
-        await supabase.from('app_users').upsert({
+        const { error: insertError } = await supabase.from('app_users').insert({
           id: userId,
           name: data.name || 'New User',
           username: data.username || '@newuser',
-          phone: data.phone || phoneNumber || '',
+          phone: '',
           email: session?.user?.email || email || '',
           avatar: data.avatar || '',
           bio: data.bio || '',
@@ -409,15 +407,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
           is_verified: false,
           updated_at: new Date().toISOString(),
         });
+        if (insertError) {
+          console.warn('Failed to save profile to Supabase', insertError);
+          return;
+        }
+        setAuthStage('authenticated');
       } catch (err) {
         console.warn('Failed to save profile to Supabase', err);
       }
     })();
-  }, [currentUserId, phoneNumber, email]);
+  }, [currentUserId, email]);
 
   const signOut = useCallback(() => {
-    setAuthStage('method');
-    setPhoneNumber('');
+    setAuthStage('login');
     setEmail('');
     setCurrentUserId(CURRENT_USER_ID);
     if (!isSupabaseConfigured) return;
@@ -810,8 +812,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   return (
     <AppContext.Provider value={{
-      authStage, phoneNumber, email, currentUserId, currentUser,
-      setAuthStage, setPhoneNumber, setEmail, completeProfile, signOut,
+      authStage, email, currentUserId, currentUser,
+      setAuthStage, setEmail, completeProfile, signOut,
       activeTab, setActiveTab,
       users, chats, messages, moments, calls, notifications, channelPosts,
       settings, updateSettings,
