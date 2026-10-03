@@ -197,8 +197,8 @@ export function ChatView({ chatId, onBack, onCall }: ChatViewProps) {
                 </button>
               )}
               <div className="border-t border-white/5 my-1" />
-              <button className="w-full px-4 py-2.5 flex items-center gap-3 text-sm text-error-400 hover:bg-white/5 transition-colors">
-                <Trash2 className="w-4 h-4" /> Delete chat
+              <button onClick={() => { toggleMuteChat(chatId); setShowMenu(false); }} className="w-full px-4 py-2.5 flex items-center gap-3 text-sm text-error-400 hover:bg-white/5 transition-colors">
+                <Trash2 className="w-4 h-4" /> Leave chat
               </button>
             </div>
           </>
@@ -317,7 +317,7 @@ export function ChatView({ chatId, onBack, onCall }: ChatViewProps) {
               </div>
               <span className="text-2xs text-ink-300">Sticker</span>
             </button>
-            <button className="flex flex-col items-center gap-1.5 group">
+            <button onClick={() => handleAttach('voice')} className="flex flex-col items-center gap-1.5 group">
               <div className="w-12 h-12 rounded-2xl bg-success-500/20 flex items-center justify-center group-hover:bg-success-500/30 transition-colors">
                 <Mic className="w-5 h-5 text-success-400" />
               </div>
@@ -381,7 +381,7 @@ export function ChatView({ chatId, onBack, onCall }: ChatViewProps) {
               <Send className="w-5 h-5 text-white" />
             </button>
           ) : (
-            <button className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 bg-white/5 transition-all active:scale-90">
+            <button onClick={() => handleAttach('voice')} className="w-10 h-10 rounded-full flex items-center justify-center shrink-0 bg-white/5 transition-all active:scale-90">
               <Mic className="w-5 h-5 text-ink-200" />
             </button>
           )}

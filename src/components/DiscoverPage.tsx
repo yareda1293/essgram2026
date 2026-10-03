@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Avatar } from '@/components/Avatar';
-import { Search, Radio, Users, Sparkles, BadgeCheck, TrendingUp, Hash, X } from 'lucide-react';
+import { Search, Radio, Users, Sparkles, BadgeCheck, TrendingUp, X } from 'lucide-react';
 import { discoverChannels, discoverGroups, discoverCreators } from '@/data';
 import { cn } from '@/lib/cn';
 import { formatCount } from '@/utils';
@@ -10,12 +10,37 @@ type DiscoverTab = 'channels' | 'groups' | 'creators';
 export function DiscoverPage({ onOpenChannel }: { onOpenChannel?: (chatId: string) => void }) {
   const [tab, setTab] = useState<DiscoverTab>('channels');
   const [search, setSearch] = useState('');
+  const [joinedChannels, setJoinedChannels] = useState<Set<string>>(new Set());
+  const [joinedGroups, setJoinedGroups] = useState<Set<string>>(new Set());
+  const [followedCreators, setFollowedCreators] = useState<Set<string>>(new Set());
 
   const tabs = [
     { key: 'channels' as const, label: 'Channels', icon: Radio },
     { key: 'groups' as const, label: 'Groups', icon: Users },
     { key: 'creators' as const, label: 'Creators', icon: Sparkles },
   ];
+
+  const toggleChannel = (id: string) => {
+    setJoinedChannels(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const toggleGroup = (id: string) => {
+    setJoinedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const toggleCreator = (id: string) => {
+    setFollowedCreators(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
 
   return (
     <div className="flex flex-col h-full">
@@ -60,13 +85,18 @@ export function DiscoverPage({ onOpenChannel }: { onOpenChannel?: (chatId: strin
       {/* Content */}
       <div className="flex-1 overflow-y-auto">
         {tab === 'channels' && (
-          <DiscoverChannels search={search} onOpenChannel={onOpenChannel} />
+          <DiscoverChannels
+            search={search}
+            onOpenChannel={onOpenChannel}
+            joined={joinedChannels}
+            onToggle={toggleChannel}
+          />
         )}
         {tab === 'groups' && (
-          <DiscoverGroups search={search} />
+          <DiscoverGroups search={search} joined={joinedGroups} onToggle={toggleGroup} />
         )}
         {tab === 'creators' && (
-          <DiscoverCreators search={search} />
+          <DiscoverCreators search={search} followed={followedCreators} onToggle={toggleCreator} />
         )}
         <div className="h-24" />
       </div>
@@ -74,7 +104,12 @@ export function DiscoverPage({ onOpenChannel }: { onOpenChannel?: (chatId: strin
   );
 }
 
-function DiscoverChannels({ search, onOpenChannel }: { search: string; onOpenChannel?: (id: string) => void }) {
+function DiscoverChannels({ search, onOpenChannel, joined, onToggle }: {
+  search: string;
+  onOpenChannel?: (id: string) => void;
+  joined: Set<string>;
+  onToggle: (id: string) => void;
+}) {
   const filtered = discoverChannels.filter(c =>
     c.name.toLowerCase().includes(search.toLowerCase()) ||
     c.description.toLowerCase().includes(search.toLowerCase())
@@ -115,41 +150,48 @@ function DiscoverChannels({ search, onOpenChannel }: { search: string; onOpenCha
           <p className="text-sm text-ink-300">Try a different search term.</p>
         </div>
       ) : (
-        filtered.map(channel => (
-          <div key={channel.id} className="flex items-center gap-3 px-4 py-3 hover:bg-white/5 transition-colors">
-            <div className="relative">
-              <Avatar src={channel.avatar} name={channel.name} size={52} />
-              <div className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-ink-700 flex items-center justify-center border-2 border-ink-900">
-                <Radio className="w-3 h-3 text-violet-400" />
+        filtered.map(channel => {
+          const isJoined = joined.has(channel.id);
+          return (
+            <div key={channel.id} className="flex items-center gap-3 px-4 py-3 hover:bg-white/5 transition-colors">
+              <div className="relative">
+                <Avatar src={channel.avatar} name={channel.name} size={52} />
+                <div className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full bg-ink-700 flex items-center justify-center border-2 border-ink-900">
+                  <Radio className="w-3 h-3 text-violet-400" />
+                </div>
               </div>
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-1.5">
-                <h3 className="font-semibold text-sm text-ink-50 truncate">{channel.name}</h3>
-                {channel.isVerified && <BadgeCheck className="w-4 h-4 text-sky-400 shrink-0" />}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <h3 className="font-semibold text-sm text-ink-50 truncate">{channel.name}</h3>
+                  {channel.isVerified && <BadgeCheck className="w-4 h-4 text-sky-400 shrink-0" />}
+                </div>
+                <p className="text-xs text-ink-300 truncate">{channel.description}</p>
+                <p className="text-2xs text-violet-400 mt-0.5">{formatCount(channel.subscribers)} subscribers</p>
               </div>
-              <p className="text-xs text-ink-300 truncate">{channel.description}</p>
-              <p className="text-2xs text-violet-400 mt-0.5">{formatCount(channel.subscribers)} subscribers</p>
+              <button
+                onClick={() => onToggle(channel.id)}
+                className={cn(
+                  'px-3.5 py-1.5 rounded-full text-xs font-semibold active:scale-95 transition-all',
+                  isJoined
+                    ? 'bg-success-500/20 text-success-400'
+                    : 'accent-bg text-white'
+                )}
+              >
+                {isJoined ? 'Joined' : 'Join'}
+              </button>
             </div>
-            <button
-              onClick={(event) => {
-                event.currentTarget.textContent = 'Joined';
-                event.currentTarget.classList.remove('accent-bg', 'text-white');
-                event.currentTarget.classList.add('bg-success-500/20', 'text-success-400');
-                event.currentTarget.disabled = true;
-              }}
-              className="px-3.5 py-1.5 rounded-full text-xs font-semibold accent-bg text-white active:scale-95 transition-transform"
-            >
-              Join
-            </button>
-          </div>
-        ))
+          );
+        })
       )}
     </div>
   );
 }
 
-function DiscoverGroups({ search }: { search: string }) {
+function DiscoverGroups({ search, joined, onToggle }: {
+  search: string;
+  joined: Set<string>;
+  onToggle: (id: string) => void;
+}) {
   const filtered = discoverGroups.filter(g =>
     g.name.toLowerCase().includes(search.toLowerCase()) ||
     g.description.toLowerCase().includes(search.toLowerCase())
@@ -158,29 +200,32 @@ function DiscoverGroups({ search }: { search: string }) {
   return (
     <div className="animate-fade-in px-4 pt-4 space-y-3">
       <h3 className="text-xs font-semibold text-ink-300 uppercase tracking-wide mb-2">Active Groups</h3>
-      {filtered.map(group => (
-        <div key={group.id} className="glass-card p-4 rounded-2xl hover:border-white/15 transition-colors">
-          <div className="flex items-center gap-3 mb-2">
-            <Avatar src={group.avatar} name={group.name} size={48} />
-            <div className="flex-1 min-w-0">
-              <h3 className="font-semibold text-sm text-ink-50 truncate">{group.name}</h3>
-              <p className="text-2xs text-ink-300">{formatCount(group.members)} members</p>
+      {filtered.map(group => {
+        const isJoined = joined.has(group.id);
+        return (
+          <div key={group.id} className="glass-card p-4 rounded-2xl hover:border-white/15 transition-colors">
+            <div className="flex items-center gap-3 mb-2">
+              <Avatar src={group.avatar} name={group.name} size={48} />
+              <div className="flex-1 min-w-0">
+                <h3 className="font-semibold text-sm text-ink-50 truncate">{group.name}</h3>
+                <p className="text-2xs text-ink-300">{formatCount(group.members)} members</p>
+              </div>
+              <button
+                onClick={() => onToggle(group.id)}
+                className={cn(
+                  'px-3.5 py-1.5 rounded-full text-xs font-semibold active:scale-95 transition-all',
+                  isJoined
+                    ? 'bg-success-500/20 text-success-400'
+                    : 'bg-white/5 text-ink-100 hover:bg-white/10'
+                )}
+              >
+                {isJoined ? 'Joined' : 'Join'}
+              </button>
             </div>
-            <button
-              onClick={(event) => {
-                event.currentTarget.textContent = 'Joined';
-                event.currentTarget.classList.remove('bg-white/5', 'text-ink-100', 'hover:bg-white/10');
-                event.currentTarget.classList.add('bg-success-500/20', 'text-success-400');
-                event.currentTarget.disabled = true;
-              }}
-              className="px-3.5 py-1.5 rounded-full text-xs font-semibold bg-white/5 text-ink-100 hover:bg-white/10 transition-colors active:scale-95"
-            >
-              Join
-            </button>
+            <p className="text-xs text-ink-300 leading-relaxed">{group.description}</p>
           </div>
-          <p className="text-xs text-ink-300 leading-relaxed">{group.description}</p>
-        </div>
-      ))}
+        );
+      })}
       {filtered.length === 0 && (
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <div className="w-16 h-16 rounded-2xl glass-card flex items-center justify-center mb-4">
@@ -194,7 +239,11 @@ function DiscoverGroups({ search }: { search: string }) {
   );
 }
 
-function DiscoverCreators({ search }: { search: string }) {
+function DiscoverCreators({ search, followed, onToggle }: {
+  search: string;
+  followed: Set<string>;
+  onToggle: (id: string) => void;
+}) {
   const filtered = discoverCreators.filter(c =>
     c.name.toLowerCase().includes(search.toLowerCase()) ||
     c.username.toLowerCase().includes(search.toLowerCase())
@@ -205,30 +254,33 @@ function DiscoverCreators({ search }: { search: string }) {
       <div className="px-4 pt-4 pb-2">
         <h3 className="text-xs font-semibold text-ink-300 uppercase tracking-wide mb-3">Featured Creators</h3>
       </div>
-      {filtered.map(creator => (
-        <div key={creator.id} className="flex items-center gap-3 px-4 py-3 hover:bg-white/5 transition-colors">
-          <Avatar src={creator.avatar} name={creator.name} size={52} />
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-1.5">
-              <h3 className="font-semibold text-sm text-ink-50 truncate">{creator.name}</h3>
-              {creator.isVerified && <BadgeCheck className="w-4 h-4 text-sky-400 shrink-0" />}
+      {filtered.map(creator => {
+        const isFollowing = followed.has(creator.id);
+        return (
+          <div key={creator.id} className="flex items-center gap-3 px-4 py-3 hover:bg-white/5 transition-colors">
+            <Avatar src={creator.avatar} name={creator.name} size={52} />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-1.5">
+                <h3 className="font-semibold text-sm text-ink-50 truncate">{creator.name}</h3>
+                {creator.isVerified && <BadgeCheck className="w-4 h-4 text-sky-400 shrink-0" />}
+              </div>
+              <p className="text-xs text-ink-300 truncate">{creator.username}</p>
+              <p className="text-2xs text-ink-400 mt-0.5">{formatCount(creator.followers)} followers</p>
             </div>
-            <p className="text-xs text-ink-300 truncate">{creator.username}</p>
-            <p className="text-2xs text-ink-400 mt-0.5">{formatCount(creator.followers)} followers</p>
+            <button
+              onClick={() => onToggle(creator.id)}
+              className={cn(
+                'px-3.5 py-1.5 rounded-full text-xs font-semibold active:scale-95 transition-all',
+                isFollowing
+                  ? 'bg-success-500/20 text-success-400'
+                  : 'accent-bg text-white'
+              )}
+            >
+              {isFollowing ? 'Following' : 'Follow'}
+            </button>
           </div>
-          <button
-            onClick={(event) => {
-              event.currentTarget.textContent = 'Following';
-              event.currentTarget.classList.remove('accent-bg', 'text-white');
-              event.currentTarget.classList.add('bg-success-500/20', 'text-success-400');
-              event.currentTarget.disabled = true;
-            }}
-            className="px-3.5 py-1.5 rounded-full text-xs font-semibold accent-bg text-white active:scale-95 transition-transform"
-          >
-            Follow
-          </button>
-        </div>
-      ))}
+        );
+      })}
       {filtered.length === 0 && (
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <div className="w-16 h-16 rounded-2xl glass-card flex items-center justify-center mb-4">

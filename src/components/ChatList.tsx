@@ -60,9 +60,7 @@ export function ChatList({ onOpenChat, onOpenMoment, onSearchFocus }: ChatListPr
       <div className="glass-strong sticky top-0 z-20 px-4 pt-3 pb-3 border-b border-white/5">
         <div className="flex items-center justify-between mb-3">
           <h1 className="font-display text-2xl font-bold text-ink-50">Chats</h1>
-          <button className="icon-btn">
-            <MessageCircle className="w-5 h-5" />
-          </button>
+          <div className="w-9 h-9" />
         </div>
 
         {/* Search */}

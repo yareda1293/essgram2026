@@ -4,7 +4,7 @@ import { Avatar } from '@/components/Avatar';
 import { seedSpaces } from '@/data';
 import {
   ArrowLeft, Radio, Users, Calendar, ImageIcon, Crown,
-  MoreVertical, Bell, Share2, ChevronRight, MapPin, Check, Clock,
+  MoreVertical, Bell, Share2, ChevronRight, MapPin, Check, Clock, X,
 } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { formatRelativeTime, formatCount } from '@/utils';
@@ -12,9 +12,12 @@ import { formatRelativeTime, formatCount } from '@/utils';
 type SpaceTab = 'channel' | 'group' | 'media' | 'events' | 'members';
 
 export function SpaceView({ spaceId, onBack, onOpenChat }: { spaceId: string; onBack: () => void; onOpenChat: (chatId: string) => void }) {
-  const { chats } = useApp();
+  const { chats, toggleMuteChat } = useApp();
   const space = seedSpaces.find(s => s.id === spaceId);
   const [tab, setTab] = useState<SpaceTab>('channel');
+  const [joined, setJoined] = useState(false);
+  const [showShare, setShowShare] = useState(false);
+  const [rsvp, setRsvp] = useState<Record<string, 'going' | 'maybe'>>({});
 
   if (!space) return null;
 
@@ -40,13 +43,13 @@ export function SpaceView({ spaceId, onBack, onOpenChat }: { spaceId: string; on
             <ArrowLeft className="w-5 h-5 text-white" />
           </button>
           <div className="flex gap-1">
-            <button className="w-9 h-9 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center active:scale-90 transition-transform">
+            <button onClick={() => channelChat && toggleMuteChat(channelChat.id)} className="w-9 h-9 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center active:scale-90 transition-transform">
               <Bell className="w-4 h-4 text-white" />
             </button>
-            <button className="w-9 h-9 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center active:scale-90 transition-transform">
+            <button onClick={() => setShowShare(true)} className="w-9 h-9 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center active:scale-90 transition-transform">
               <Share2 className="w-4 h-4 text-white" />
             </button>
-            <button className="w-9 h-9 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center active:scale-90 transition-transform">
+            <button className="w-9 h-9 rounded-full bg-black/40 backdrop-blur-md flex items-center justify-center active:scale-90 transition-transform" aria-label="More options">
               <MoreVertical className="w-4 h-4 text-white" />
             </button>
           </div>
@@ -65,8 +68,8 @@ export function SpaceView({ spaceId, onBack, onOpenChat }: { spaceId: string; on
           </div>
         </div>
         <p className="text-sm text-ink-200 leading-relaxed mb-3">{space.description}</p>
-        <button className="btn-accent w-full">
-          Join Space
+        <button onClick={() => setJoined(j => !j)} className={cn('w-full', joined ? 'bg-success-500/20 text-success-400 border border-success-500/30' : 'btn-accent')}>
+          {joined ? 'Joined' : 'Join Space'}
         </button>
       </div>
 
@@ -174,11 +177,17 @@ export function SpaceView({ spaceId, onBack, onOpenChat }: { spaceId: string; on
                   </div>
                   <p className="text-xs text-ink-300 leading-relaxed mb-3">{event.description}</p>
                   <div className="flex items-center gap-2">
-                    <button className="flex-1 py-2 rounded-xl text-xs font-semibold accent-bg text-white flex items-center justify-center gap-1.5 active:scale-95 transition-transform">
-                      <Check className="w-3.5 h-3.5" /> Going ({goingCount})
+                    <button
+                      onClick={() => setRsvp(prev => ({ ...prev, [event.id]: 'going' }))}
+                      className={cn('flex-1 py-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 active:scale-95 transition-transform', rsvp[event.id] === 'going' ? 'accent-bg text-white' : 'accent-bg text-white opacity-60')}
+                    >
+                      <Check className="w-3.5 h-3.5" /> Going ({goingCount + (rsvp[event.id] === 'going' ? 1 : 0)})
                     </button>
-                    <button className="flex-1 py-2 rounded-xl text-xs font-semibold bg-white/5 text-ink-100 hover:bg-white/10 transition-colors">
-                      Maybe ({maybeCount})
+                    <button
+                      onClick={() => setRsvp(prev => ({ ...prev, [event.id]: 'maybe' }))}
+                      className={cn('flex-1 py-2 rounded-xl text-xs font-semibold transition-colors', rsvp[event.id] === 'maybe' ? 'bg-violet-600/20 text-violet-400' : 'bg-white/5 text-ink-100 hover:bg-white/10')}
+                    >
+                      Maybe ({maybeCount + (rsvp[event.id] === 'maybe' ? 1 : 0)})
                     </button>
                   </div>
                 </div>
@@ -247,6 +256,36 @@ export function SpaceView({ spaceId, onBack, onOpenChat }: { spaceId: string; on
         )}
         <div className="h-24" />
       </div>
+
+      {showShare && (
+        <div className="fixed inset-0 z-[100] flex items-end animate-fade-in" onClick={() => setShowShare(false)}>
+          <div className="absolute inset-0 bg-black/50" />
+          <div className="relative w-full glass-strong rounded-t-3xl p-5 pb-8 animate-slide-in-up" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-display text-lg font-semibold text-ink-50">Share Space</h3>
+              <button onClick={() => setShowShare(false)} className="icon-btn">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="glass-card rounded-2xl p-4 mb-4">
+              <p className="text-xs text-ink-300 mb-2">Space invite link</p>
+              <div className="flex items-center gap-2">
+                <input
+                  readOnly
+                  value={`essgram.app/space/${space.name.toLowerCase().replace(/\s+/g, '')}`}
+                  className="glass-input flex-1 px-3 py-2 text-sm"
+                />
+                <button
+                  onClick={() => navigator.clipboard?.writeText(`essgram.app/space/${space.name.toLowerCase().replace(/\s+/g, '')}`)}
+                  className="px-4 py-2 rounded-xl text-sm font-semibold accent-bg text-white active:scale-95 transition-transform"
+                >
+                  Copy
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

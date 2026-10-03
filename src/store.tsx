@@ -23,7 +23,9 @@ interface AppState {
   currentUser: User;
   setAuthStage: (s: AuthStage) => void;
   setEmail: (e: string) => void;
-  completeProfile: (data: Partial<User>) => void;
+  completeProfile: (data: Partial<User>) => Promise<{ error: string | null }>;
+  updateProfile: (data: Partial<User>) => Promise<{ error: string | null }>;
+  unblockUser: (userId: string) => void;
   signOut: () => void;
 
   activeTab: TabKey;
@@ -190,7 +192,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // ---- Check for existing Supabase session on mount ----
   // Restores authentication if the user reloads the page.
   useEffect(() => {
-    if (!isSupabaseConfigured) return;
+    if (!isSupabaseConfigured) {
+      setAuthStage('login');
+      return;
+    }
 
     (async () => {
       try {
@@ -228,7 +233,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           setEmail('');
           return;
         }
-        if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
+        if (event === 'SIGNED_IN' || event === 'USER_UPDATED' || event === 'TOKEN_REFRESHED') {
           const supabaseUserId = session.user.id;
           setCurrentUserId(supabaseUserId);
           // The AuthFlow component handles the stage transition to 'profile'
@@ -382,19 +387,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const currentUser = users.find(u => u.id === currentUserId) || users[0];
 
-  const completeProfile = useCallback((data: Partial<User>) => {
+  const completeProfile = useCallback((data: Partial<User>): Promise<{ error: string | null }> => {
     if (!isSupabaseConfigured) {
       setAuthStage('authenticated');
-      return;
+      return Promise.resolve({ error: null });
     }
-    (async () => {
+    return (async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         const userId = session?.user?.id || currentUserId;
         if (session?.user?.id) {
           setCurrentUserId(session.user.id);
         }
-        const { error: insertError } = await supabase.from('app_users').insert({
+        const { error: upsertError } = await supabase.from('app_users').upsert({
           id: userId,
           name: data.name || 'New User',
           username: data.username || '@newuser',
@@ -407,16 +412,39 @@ export function AppProvider({ children }: { children: ReactNode }) {
           is_verified: false,
           updated_at: new Date().toISOString(),
         });
-        if (insertError) {
-          console.warn('Failed to save profile to Supabase', insertError);
-          return;
+        if (upsertError) {
+          return { error: upsertError.message };
         }
         setAuthStage('authenticated');
+        return { error: null };
       } catch (err) {
-        console.warn('Failed to save profile to Supabase', err);
+        return { error: 'Something went wrong. Please try again.' };
       }
     })();
   }, [currentUserId, email]);
+
+  const updateProfile = useCallback(async (data: Partial<User>): Promise<{ error: string | null }> => {
+    setUsers(prev => prev.map(u => u.id === currentUserId ? { ...u, ...data } : u));
+    if (!isSupabaseConfigured) return { error: null };
+    try {
+      const { error: updateError } = await supabase
+        .from('app_users')
+        .update({
+          name: data.name,
+          bio: data.bio,
+          status: data.status,
+          avatar: data.avatar,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', currentUserId);
+      if (updateError) {
+        return { error: 'Failed to save profile changes.' };
+      }
+      return { error: null };
+    } catch {
+      return { error: 'Something went wrong. Please try again.' };
+    }
+  }, [currentUserId]);
 
   const signOut = useCallback(() => {
     setAuthStage('login');
@@ -458,6 +486,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return next;
     });
   }, []);
+
+  const unblockUser = useCallback((userId: string) => {
+    updateSettings({ blockedUsers: settings.blockedUsers.filter(id => id !== userId) });
+  }, [settings.blockedUsers, updateSettings]);
 
   const sendMessage = useCallback((chatId: string, text: string, type: Message['type'] = 'text', extra?: Partial<Message>) => {
     const newMsg: Message = {
@@ -813,7 +845,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   return (
     <AppContext.Provider value={{
       authStage, email, currentUserId, currentUser,
-      setAuthStage, setEmail, completeProfile, signOut,
+      setAuthStage, setEmail, completeProfile, updateProfile, unblockUser, signOut,
       activeTab, setActiveTab,
       users, chats, messages, moments, calls, notifications, channelPosts,
       settings, updateSettings,

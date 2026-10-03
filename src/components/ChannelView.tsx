@@ -13,7 +13,7 @@ import { formatRelativeTime, formatCount } from '@/utils';
 const POST_EMOJIS = ['❤️', '🔥', '👍', '🎉', '😮', '😢'];
 
 export function ChannelView({ chatId, onBack }: { chatId: string; onBack: () => void }) {
-  const { chats, channelPosts, currentUserId, togglePostReaction, addChannelPost, togglePinPost, addComment } = useApp();
+  const { chats, channelPosts, currentUserId, togglePostReaction, addChannelPost, togglePinPost, addComment, toggleMuteChat } = useApp();
   const chat = chats.find(c => c.id === chatId);
   const [showComments, setShowComments] = useState<ChannelPost | null>(null);
   const [commentText, setCommentText] = useState('');
@@ -73,10 +73,10 @@ export function ChannelView({ chatId, onBack }: { chatId: string; onBack: () => 
           <>
             <div className="fixed inset-0 z-20" onClick={() => setShowMenu(false)} />
             <div className="absolute top-full right-3 mt-1 glass-strong rounded-xl shadow-float py-1.5 z-30 min-w-[180px] animate-scale-in">
-              <button className="w-full px-4 py-2.5 flex items-center gap-3 text-sm text-ink-100 hover:bg-white/5 transition-colors">
+              <button onClick={() => { toggleMuteChat(chatId); setShowMenu(false); }} className="w-full px-4 py-2.5 flex items-center gap-3 text-sm text-ink-100 hover:bg-white/5 transition-colors">
                 <Bell className="w-4 h-4" /> {chat.isMuted ? 'Unmute' : 'Mute'}
               </button>
-              <button className="w-full px-4 py-2.5 flex items-center gap-3 text-sm text-ink-100 hover:bg-white/5 transition-colors">
+              <button onClick={() => setShowShare(true)} className="w-full px-4 py-2.5 flex items-center gap-3 text-sm text-ink-100 hover:bg-white/5 transition-colors">
                 <Users className="w-4 h-4" /> Subscriber list
               </button>
               <button onClick={() => setShowShare(true)} className="w-full px-4 py-2.5 flex items-center gap-3 text-sm text-ink-100 hover:bg-white/5 transition-colors">

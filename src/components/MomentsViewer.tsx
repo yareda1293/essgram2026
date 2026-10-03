@@ -18,6 +18,8 @@ export function MomentsViewer({
   const [progress, setProgress] = useState(0);
   const [paused, setPaused] = useState(false);
   const [replyText, setReplyText] = useState('');
+  const [liked, setLiked] = useState(false);
+  const [replySent, setReplySent] = useState(false);
   const timerRef = useRef<number | null>(null);
   const DURATION = 5000;
 
@@ -153,12 +155,28 @@ export function MomentsViewer({
                 className="flex-1 bg-white/10 backdrop-blur-md border border-white/20 rounded-full px-4 py-2.5 text-sm text-white placeholder:text-white/50 outline-none"
                 onPointerDown={e => e.stopPropagation()}
               />
-              <button className="w-10 h-10 rounded-full bg-white/10 backdrop-blur-md flex items-center justify-center active:scale-90 transition-transform">
-                <Heart className="w-5 h-5 text-white" />
+              <button
+                onClick={() => setLiked(l => !l)}
+                className={cn('w-10 h-10 rounded-full backdrop-blur-md flex items-center justify-center active:scale-90 transition-all', liked ? 'bg-error-500/30' : 'bg-white/10')}
+              >
+                <Heart className={cn('w-5 h-5 text-white', liked && 'fill-error-500 text-error-500')} />
               </button>
-              <button className="w-10 h-10 rounded-full bg-white/10 backdrop-blur-md flex items-center justify-center active:scale-90 transition-transform">
+              <button
+                onClick={() => {
+                  if (replyText.trim()) {
+                    setReplyText('');
+                    setReplySent(true);
+                    setTimeout(() => setReplySent(false), 2000);
+                  }
+                }}
+                disabled={!replyText.trim()}
+                className={cn('w-10 h-10 rounded-full bg-white/10 backdrop-blur-md flex items-center justify-center active:scale-90 transition-all disabled:opacity-40')}
+              >
                 <Send className="w-5 h-5 text-white" />
               </button>
+              {replySent && (
+                <span className="absolute -top-8 left-1/2 -translate-x-1/2 text-xs text-white/80 bg-white/10 backdrop-blur-md px-3 py-1 rounded-full">Reply sent</span>
+              )}
             </div>
           </div>
         )}

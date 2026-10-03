@@ -342,7 +342,7 @@ export function AuthFlow() {
   }, [email]);
 
   // ---- Profile submit ----
-  const handleProfileSubmit = useCallback(() => {
+  const handleProfileSubmit = useCallback(async () => {
     if (!fullName.trim()) {
       setError('Please enter your full name.');
       return;
@@ -361,12 +361,16 @@ export function AuthFlow() {
     }
     setError('');
     setLoading(true);
-    completeProfile({
+    const result = await completeProfile({
       name: fullName,
       username: username,
       bio,
       avatar: photoUrl,
     });
+    setLoading(false);
+    if (result?.error) {
+      setError(result.error);
+    }
   }, [fullName, username, usernameStatus, bio, photoUrl, completeProfile]);
 
   // ============ SCREENS ============

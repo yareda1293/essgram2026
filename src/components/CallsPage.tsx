@@ -183,7 +183,7 @@ export function CallOverlay({ userId, type, onEnd }: { userId: string; type: 'vo
             <Volume2 className="w-6 h-6" />
           </button>
 
-          <button className="w-14 h-14 rounded-full bg-white/10 backdrop-blur-md flex items-center justify-center text-white transition-all active:scale-90">
+          <button onClick={onEnd} className="w-14 h-14 rounded-full bg-white/10 backdrop-blur-md flex items-center justify-center text-white transition-all active:scale-90" aria-label="More options">
             <MoreHorizontal className="w-6 h-6" />
           </button>
         </div>

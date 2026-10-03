@@ -31,11 +31,13 @@ const ACCENT_COLORS = [
 ];
 
 export function ProfilePage() {
-  const { currentUser, settings, updateSettings, users, signOut } = useApp();
+  const { currentUser, settings, updateSettings, updateProfile, unblockUser, users, signOut } = useApp();
   const [section, setSection] = useState<SettingsSection>('main');
   const [open, setOpen] = useState(false);
   const [editingProfile, setEditingProfile] = useState(false);
   const [blockedOpen, setBlockedOpen] = useState(false);
+
+  const [editError, setEditError] = useState('');
 
   // Edit form
   const [name, setName] = useState(currentUser.name);
@@ -48,6 +50,16 @@ export function ProfilePage() {
   };
 
   const blockedUsers = users.filter(u => settings.blockedUsers.includes(u.id));
+
+  const handleSaveProfile = async () => {
+    setEditError('');
+    const result = await updateProfile({ name, bio, status });
+    if (result.error) {
+      setEditError(result.error);
+    } else {
+      setEditingProfile(false);
+    }
+  };
 
   return (
     <div className="flex flex-col h-full">
@@ -370,11 +382,12 @@ export function ProfilePage() {
           </div>
 
           <button
-            onClick={() => setEditingProfile(false)}
+            onClick={handleSaveProfile}
             className="btn-accent w-full mt-5"
           >
             Save Changes
           </button>
+          {editError && <p className="text-xs text-error-400 text-center mt-2">{editError}</p>}
         </div>
       </Modal>
 
@@ -403,7 +416,10 @@ export function ProfilePage() {
                     <p className="text-sm font-semibold text-ink-50 truncate">{u.name}</p>
                     <p className="text-xs text-ink-300 truncate">{u.username}</p>
                   </div>
-                  <button className="text-xs font-semibold text-violet-400 px-3 py-1.5 rounded-full hover:bg-violet-600/10 transition-colors">
+                  <button
+                    onClick={() => unblockUser(u.id)}
+                    className="text-xs font-semibold text-violet-400 px-3 py-1.5 rounded-full hover:bg-violet-600/10 transition-colors"
+                  >
                     Unblock
                   </button>
                 </div>
