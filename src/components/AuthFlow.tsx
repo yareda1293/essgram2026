@@ -2,7 +2,10 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useApp } from '@/store';
 import { supabase } from '@/lib/supabase';
 import { Spinner } from '@/components/ui';
-import { Mail, Lock, ChevronRight, Check, ArrowLeft, Camera, Send, AlertCircle, Eye, EyeOff, Loader2 } from 'lucide-react';
+import {
+  Mail, Lock, ChevronRight, Check, ArrowLeft, Camera, Send,
+  AlertCircle, Eye, EyeOff, Loader2, Phone, Sparkles, User as UserIcon, AtSign,
+} from 'lucide-react';
 import { cn } from '@/lib/cn';
 
 // ---- Helpers ----
@@ -51,6 +54,24 @@ function mapAuthError(error: { message: string }): string {
   return 'Something went wrong. Please try again.';
 }
 
+function passwordStrength(pw: string): { score: number; label: string; color: string } {
+  let score = 0;
+  if (pw.length >= 8) score++;
+  if (pw.length >= 12) score++;
+  if (/[A-Z]/.test(pw) && /[a-z]/.test(pw)) score++;
+  if (/\d/.test(pw)) score++;
+  if (/[^a-zA-Z0-9]/.test(pw)) score++;
+  const levels = [
+    { label: 'Too short', color: '#6e7690' },
+    { label: 'Weak', color: '#ef4444' },
+    { label: 'Fair', color: '#f59e0b' },
+    { label: 'Good', color: '#3b82f6' },
+    { label: 'Strong', color: '#10b981' },
+    { label: 'Very strong', color: '#10b981' },
+  ];
+  return { score, ...levels[Math.min(score, 5)] };
+}
+
 // ---- Google Icon ----
 
 function GoogleIcon({ className }: { className?: string }) {
@@ -69,13 +90,10 @@ function GoogleIcon({ className }: { className?: string }) {
 function AuthBackground() {
   return (
     <>
-      <div
-        className="absolute inset-0"
-        style={{ background: 'linear-gradient(165deg, #0f172a 0%, #1e293b 35%, #0f4a5e 70%, #064e3b 100%)' }}
-      />
-      <div className="absolute top-[-10%] left-[-15%] w-80 h-80 rounded-full blur-3xl opacity-30" style={{ background: 'radial-gradient(circle, #0ea5e9 0%, transparent 70%)' }} />
-      <div className="absolute bottom-[-10%] right-[-15%] w-80 h-80 rounded-full blur-3xl opacity-25" style={{ background: 'radial-gradient(circle, #10b981 0%, transparent 70%)' }} />
-      <div className="absolute top-[40%] left-[60%] w-60 h-60 rounded-full blur-3xl opacity-20" style={{ background: 'radial-gradient(circle, #14b8a6 0%, transparent 70%)' }} />
+      <div className="absolute inset-0 bg-gradient-hero" />
+      <div className="absolute top-[-15%] left-[-20%] w-96 h-96 rounded-full blur-[120px] opacity-25" style={{ background: 'radial-gradient(circle, #7c5cff 0%, transparent 70%)' }} />
+      <div className="absolute bottom-[-15%] right-[-20%] w-96 h-96 rounded-full blur-[120px] opacity-20" style={{ background: 'radial-gradient(circle, #ff4784 0%, transparent 70%)' }} />
+      <div className="absolute top-[30%] right-[10%] w-72 h-72 rounded-full blur-[100px] opacity-15" style={{ background: 'radial-gradient(circle, #ff5a3c 0%, transparent 70%)' }} />
     </>
   );
 }
@@ -83,12 +101,13 @@ function AuthBackground() {
 function Logo({ size = 'large' }: { size?: 'small' | 'large' }) {
   const dim = size === 'large' ? 'w-20 h-20' : 'w-14 h-14';
   const iconSize = size === 'large' ? 'w-10 h-10' : 'w-7 h-7';
+  const radius = size === 'large' ? 'rounded-[1.4rem]' : 'rounded-[1rem]';
   return (
     <div className={cn('relative', dim)}>
-      <div className="absolute inset-0 rounded-[1.4rem] rotate-6 opacity-50 blur-md" style={{ background: 'linear-gradient(135deg, #0ea5e9 0%, #14b8a6 100%)' }} />
+      <div className={cn('absolute inset-0', radius, 'rotate-6 opacity-40 blur-md bg-gradient-violet-coral')} />
       <div
-        className={cn('absolute inset-0 rounded-[1.4rem] flex items-center justify-center shadow-lg')}
-        style={{ background: 'linear-gradient(135deg, #0ea5e9 0%, #14b8a6 50%, #10b981 100%)', boxShadow: '0 8px 32px -8px rgba(14, 165, 233, 0.5)' }}
+        className={cn('absolute inset-0', radius, 'flex items-center justify-center')}
+        style={{ background: 'linear-gradient(135deg, #7c5cff 0%, #ff4784 50%, #ff5a3c 100%)', boxShadow: '0 8px 32px -8px rgba(124, 92, 255, 0.5)' }}
       >
         <Send className={cn(iconSize, 'text-white -rotate-12')} fill="white" />
       </div>
@@ -99,9 +118,9 @@ function Logo({ size = 'large' }: { size?: 'small' | 'large' }) {
 function ErrorBanner({ error }: { error: string }) {
   if (!error) return null;
   return (
-    <div className="flex items-start gap-2 p-3 rounded-xl bg-red-500/10 border border-red-500/20 animate-fade-in">
-      <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-      <p className="text-sm text-red-400 leading-relaxed">{error}</p>
+    <div className="flex items-start gap-2 p-3 rounded-xl bg-error-500/10 border border-error-500/20 animate-fade-in">
+      <AlertCircle className="w-4 h-4 text-error-400 shrink-0 mt-0.5" />
+      <p className="text-sm text-error-400 leading-relaxed">{error}</p>
     </div>
   );
 }
@@ -109,20 +128,20 @@ function ErrorBanner({ error }: { error: string }) {
 function InfoBanner({ info }: { info: string }) {
   if (!info) return null;
   return (
-    <div className="flex items-start gap-2 p-3 rounded-xl bg-sky-500/10 border border-sky-500/20 animate-fade-in">
-      <Check className="w-4 h-4 text-sky-400 shrink-0 mt-0.5" />
-      <p className="text-sm text-sky-300 leading-relaxed">{info}</p>
+    <div className="flex items-start gap-2 p-3 rounded-xl bg-violet-500/10 border border-violet-500/20 animate-fade-in">
+      <Check className="w-4 h-4 text-violet-400 shrink-0 mt-0.5" />
+      <p className="text-sm text-violet-300 leading-relaxed">{info}</p>
     </div>
   );
 }
 
-const inputClass = 'w-full pl-14 pr-4 py-3.5 text-base rounded-xl bg-white/[0.06] border border-white/10 text-white placeholder:text-slate-300/80 outline-none transition-all focus:border-sky-400/50 focus:bg-white/[0.08] backdrop-blur-sm';
+const inputClass = 'w-full pl-14 pr-4 py-4 text-base rounded-2xl bg-white/[0.04] border border-white/[0.08] text-ink-50 placeholder:text-ink-300 outline-none transition-all focus:border-violet-400/50 focus:bg-white/[0.06] backdrop-blur-sm';
 
 function BackButton({ onClick }: { onClick: () => void }) {
   return (
     <button
       onClick={onClick}
-      className="self-start mb-6 w-10 h-10 rounded-xl bg-white/[0.06] border border-white/10 flex items-center justify-center text-slate-300 hover:bg-white/10 transition-colors"
+      className="self-start mb-6 w-10 h-10 rounded-xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center text-ink-200 hover:bg-white/10 transition-colors"
     >
       <ArrowLeft className="w-5 h-5" />
     </button>
@@ -132,9 +151,65 @@ function BackButton({ onClick }: { onClick: () => void }) {
 function Divider() {
   return (
     <div className="flex items-center gap-3 py-2">
-      <div className="flex-1 h-px bg-white/10" />
-      <span className="text-xs text-slate-500 font-medium uppercase tracking-wider">or</span>
-      <div className="flex-1 h-px bg-white/10" />
+      <div className="flex-1 h-px bg-white/[0.08]" />
+      <span className="text-xs text-ink-400 font-medium uppercase tracking-wider">or</span>
+      <div className="flex-1 h-px bg-white/[0.08]" />
+    </div>
+  );
+}
+
+const accentBtnStyle: React.CSSProperties = {
+  background: 'linear-gradient(135deg, #7c5cff 0%, #ff4784 100%)',
+  boxShadow: '0 8px 24px -8px rgba(124, 92, 255, 0.6)',
+};
+
+function AccentButton({ children, loading, disabled, onClick }: {
+  children: React.ReactNode;
+  loading?: boolean;
+  disabled?: boolean;
+  onClick?: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      className="w-full flex items-center justify-center gap-2 py-4 rounded-2xl font-semibold text-white text-sm transition-all active:scale-[0.98] shadow-glow disabled:opacity-50"
+      style={accentBtnStyle}
+    >
+      {loading ? (
+        <>
+          <Spinner size={20} />
+          <span>Please wait...</span>
+        </>
+      ) : (
+        <>
+          {children}
+          <ChevronRight className="w-5 h-5" />
+        </>
+      )}
+    </button>
+  );
+}
+
+// ---- Animated splash logo for the loading stage ----
+
+function SplashLogo() {
+  return (
+    <div className="relative flex flex-col items-center animate-scale-in">
+      <div className="relative w-24 h-24 mb-4">
+        <div className="absolute inset-0 rounded-[1.8rem] rotate-12 opacity-30 blur-xl bg-gradient-violet-coral" />
+        <div
+          className="absolute inset-0 rounded-[1.8rem] flex items-center justify-center"
+          style={{ background: 'linear-gradient(135deg, #7c5cff 0%, #ff4784 50%, #ff5a3c 100%)', boxShadow: '0 12px 48px -12px rgba(124, 92, 255, 0.6)' }}
+        >
+          <Send className="w-12 h-12 text-white -rotate-12 animate-pulse-glow" fill="white" />
+        </div>
+      </div>
+      <h1 className="font-display text-2xl font-bold text-ink-50 tracking-tight">Ess Gram</h1>
+      <p className="text-ink-300 text-sm mt-1">Connecting you to your people...</p>
+      <div className="mt-6">
+        <Spinner size={28} className="text-violet-400" />
+      </div>
     </div>
   );
 }
@@ -221,26 +296,16 @@ export function AuthFlow() {
       setError(mapAuthError(oauthError));
       return;
     }
-
-    // Browser redirects to Google — no further UI needed here.
-    // The OAuth callback will trigger onAuthStateChange in store.tsx.
   }, []);
 
-  // ---- Email Continue (check if account exists via signIn attempt) ----
+  // ---- Email Continue (proceed to password screen) ----
   const handleEmailContinue = useCallback(async () => {
     if (!isValidEmail(email)) {
       setError('Please enter a valid email address.');
       return;
     }
-
     setError('');
     setLoading(true);
-
-    // Try signing in with a dummy password to detect if the email exists.
-    // Supabase returns "Invalid login credentials" regardless of whether
-    // the email exists or the password is wrong — this is by design for security.
-    // So instead, we just go to the password screen and let the user choose
-    // sign-in or sign-up. The email field is pre-filled.
     setLoading(false);
     setAuthStage('email_password');
   }, [email, setAuthStage]);
@@ -271,8 +336,6 @@ export function AuthFlow() {
       setError(mapAuthError(signInError));
       return;
     }
-
-    // onAuthStateChange in store.tsx handles the stage transition
   }, [email, password]);
 
   // ---- Email sign up ----
@@ -306,13 +369,11 @@ export function AuthFlow() {
       return;
     }
 
-    // If session returned immediately, email confirmation is disabled
     if (signUpData?.session && signUpData?.user) {
       setAuthStage('profile');
       return;
     }
 
-    // Email confirmation required — show message
     setInfo('Account created! Please check your email to confirm your account, then come back to sign in.');
   }, [email, password, confirmPassword, setAuthStage]);
 
@@ -373,9 +434,21 @@ export function AuthFlow() {
     }
   }, [fullName, username, usernameStatus, bio, photoUrl, completeProfile]);
 
+  const pwStrength = passwordStrength(password);
+
   // ============ SCREENS ============
 
-  // ---- Login (main screen) ----
+  // ---- Loading / splash ----
+  if (authStage === 'loading') {
+    return (
+      <div className="min-h-screen relative flex flex-col items-center justify-center safe-top safe-bottom overflow-hidden">
+        <AuthBackground />
+        <SplashLogo />
+      </div>
+    );
+  }
+
+  // ---- Login (main screen) — Telegram-style ----
   if (authStage === 'login') {
     return (
       <div className="min-h-screen relative flex flex-col items-center justify-center px-6 safe-top safe-bottom overflow-hidden">
@@ -384,17 +457,16 @@ export function AuthFlow() {
           <div className="mb-6">
             <Logo />
           </div>
-          <h1 className="font-display text-3xl font-bold text-white mb-2 text-center tracking-tight">
+          <h1 className="font-display text-3xl font-bold text-ink-50 mb-2 text-center tracking-tight">
             Ess Gram
           </h1>
-          <p className="text-sky-200/80 text-center mb-10 font-medium">Your people. Your space.</p>
+          <p className="text-ink-300 text-center mb-10 font-medium">Your people. Your space.</p>
 
           <div className="w-full space-y-4">
-            {/* Google button */}
             <button
               onClick={handleGoogleSignIn}
               disabled={googleLoading}
-              className="w-full flex items-center justify-center gap-3 py-3.5 rounded-xl bg-white text-gray-700 font-semibold text-sm transition-all hover:bg-gray-50 active:scale-95 shadow-lg disabled:opacity-60"
+              className="w-full flex items-center justify-center gap-3 py-4 rounded-2xl bg-white text-gray-700 font-semibold text-sm transition-all hover:bg-gray-50 active:scale-[0.98] shadow-lg disabled:opacity-60"
             >
               {googleLoading ? (
                 <>
@@ -411,9 +483,8 @@ export function AuthFlow() {
 
             <Divider />
 
-            {/* Email input */}
             <div className="relative">
-              <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+              <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-ink-300" />
               <input
                 type="email"
                 inputMode="email"
@@ -430,27 +501,12 @@ export function AuthFlow() {
 
             <ErrorBanner error={error} />
 
-            <button
-              onClick={handleEmailContinue}
-              disabled={loading || googleLoading || !email}
-              className="w-full flex items-center justify-center gap-2 py-4 rounded-xl font-semibold text-white text-sm transition-all active:scale-95 shadow-lg disabled:opacity-60"
-              style={{ background: 'linear-gradient(135deg, #0ea5e9 0%, #14b8a6 100%)', boxShadow: '0 8px 24px -8px rgba(14, 165, 233, 0.6)' }}
-            >
-              {loading ? (
-                <>
-                  <Spinner size={20} />
-                  <span>Please wait...</span>
-                </>
-              ) : (
-                <>
-                  Continue
-                  <ChevronRight className="w-5 h-5" />
-                </>
-              )}
-            </button>
+            <AccentButton onClick={handleEmailContinue} disabled={loading || googleLoading || !email}>
+              Continue
+            </AccentButton>
           </div>
 
-          <p className="text-xs text-slate-500 mt-8 text-center leading-relaxed">
+          <p className="text-xs text-ink-400 mt-8 text-center leading-relaxed">
             By continuing, you agree to our Terms of Service and Privacy Policy.
           </p>
         </div>
@@ -458,7 +514,7 @@ export function AuthFlow() {
     );
   }
 
-  // ---- Email password (sign in or sign up) ----
+  // ---- Email password (sign in) — Telegram-style ----
   if (authStage === 'email_password') {
     return (
       <div className="min-h-screen relative flex flex-col items-center justify-center px-6 safe-top safe-bottom overflow-y-auto">
@@ -466,16 +522,20 @@ export function AuthFlow() {
         <div className="relative w-full max-w-sm flex flex-col items-center py-8 animate-fade-in-up">
           <BackButton onClick={() => { setError(''); setPassword(''); setInfo(''); setAuthStage('login'); }} />
 
-          <h1 className="font-display text-2xl font-bold text-white mb-2 text-center">
+          <div className="mb-6">
+            <Logo size="small" />
+          </div>
+
+          <h1 className="font-display text-2xl font-bold text-ink-50 mb-2 text-center">
             Welcome back
           </h1>
-          <p className="text-sm text-slate-400 text-center mb-8 leading-relaxed">
-            Sign in to your account or create a new one.
+          <p className="text-sm text-ink-300 text-center mb-8 leading-relaxed">
+            Sign in to your Ess Gram account
           </p>
 
           <div className="w-full space-y-4">
             <div className="relative">
-              <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+              <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-ink-300" />
               <input
                 type="email"
                 inputMode="email"
@@ -490,7 +550,7 @@ export function AuthFlow() {
             </div>
 
             <div className="relative">
-              <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+              <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-ink-300" />
               <input
                 type={showPassword ? 'text' : 'password'}
                 autoComplete="current-password"
@@ -505,7 +565,7 @@ export function AuthFlow() {
               <button
                 type="button"
                 onClick={() => setShowPassword(s => !s)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-300 hover:text-ink-100 transition-colors"
                 tabIndex={-1}
               >
                 {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
@@ -515,7 +575,7 @@ export function AuthFlow() {
             <button
               onClick={() => { setError(''); setInfo(''); setAuthStage('forgot_password'); }}
               disabled={loading}
-              className="text-sm text-slate-400 hover:text-sky-400 transition-colors self-start"
+              className="text-sm text-violet-400 hover:text-violet-300 transition-colors self-start font-medium"
             >
               Forgot password?
             </button>
@@ -523,30 +583,15 @@ export function AuthFlow() {
             <ErrorBanner error={error} />
             <InfoBanner info={info} />
 
-            <button
-              onClick={handleEmailSignIn}
-              disabled={loading || !email || !password}
-              className="w-full flex items-center justify-center gap-2 py-4 rounded-xl font-semibold text-white text-sm transition-all active:scale-95 shadow-lg disabled:opacity-60"
-              style={{ background: 'linear-gradient(135deg, #0ea5e9 0%, #14b8a6 100%)', boxShadow: '0 8px 24px -8px rgba(14, 165, 233, 0.6)' }}
-            >
-              {loading ? (
-                <>
-                  <Spinner size={20} />
-                  <span>Signing in...</span>
-                </>
-              ) : (
-                <>
-                  Sign In
-                  <ChevronRight className="w-5 h-5" />
-                </>
-              )}
-            </button>
+            <AccentButton onClick={handleEmailSignIn} disabled={loading || !email || !password}>
+              Sign In
+            </AccentButton>
 
-            <p className="text-sm text-slate-500 text-center pt-2">
+            <p className="text-sm text-ink-400 text-center pt-2">
               Don't have an account?{' '}
               <button
                 onClick={() => { setError(''); setPassword(''); setConfirmPassword(''); setInfo(''); setAuthStage('email_signup'); }}
-                className="text-sky-400 hover:text-sky-300 font-medium"
+                className="text-violet-400 hover:text-violet-300 font-medium"
               >
                 Create one
               </button>
@@ -557,7 +602,7 @@ export function AuthFlow() {
     );
   }
 
-  // ---- Email sign up ----
+  // ---- Email sign up — Telegram-style with password strength ----
   if (authStage === 'email_signup') {
     return (
       <div className="min-h-screen relative flex flex-col items-center justify-center px-6 safe-top safe-bottom overflow-y-auto">
@@ -565,16 +610,20 @@ export function AuthFlow() {
         <div className="relative w-full max-w-sm flex flex-col items-center py-8 animate-fade-in-up">
           <BackButton onClick={() => { setError(''); setPassword(''); setConfirmPassword(''); setInfo(''); setAuthStage('email_password'); }} />
 
-          <h1 className="font-display text-2xl font-bold text-white mb-2 text-center">
+          <div className="mb-6">
+            <Logo size="small" />
+          </div>
+
+          <h1 className="font-display text-2xl font-bold text-ink-50 mb-2 text-center">
             Create Account
           </h1>
-          <p className="text-sm text-slate-400 text-center mb-8 leading-relaxed">
-            Enter your email and choose a password.
+          <p className="text-sm text-ink-300 text-center mb-8 leading-relaxed">
+            Join the Ess Gram community
           </p>
 
           <div className="w-full space-y-4">
             <div className="relative">
-              <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+              <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-ink-300" />
               <input
                 type="email"
                 inputMode="email"
@@ -588,30 +637,50 @@ export function AuthFlow() {
               />
             </div>
 
-            <div className="relative">
-              <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
-              <input
-                type={showPassword ? 'text' : 'password'}
-                autoComplete="new-password"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                placeholder="Password (min 8 characters)"
-                aria-label="Password"
-                className={cn(inputClass, 'pr-12')}
-                disabled={loading}
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(s => !s)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200"
-                tabIndex={-1}
-              >
-                {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-              </button>
+            <div>
+              <div className="relative">
+                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-ink-300" />
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  autoComplete="new-password"
+                  value={password}
+                  onChange={e => setPassword(e.target.value)}
+                  placeholder="Password (min 8 characters)"
+                  aria-label="Password"
+                  className={cn(inputClass, 'pr-12')}
+                  disabled={loading}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(s => !s)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-300 hover:text-ink-100 transition-colors"
+                  tabIndex={-1}
+                >
+                  {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                </button>
+              </div>
+              {password.length > 0 && (
+                <div className="flex items-center gap-2 mt-2 px-1">
+                  <div className="flex-1 flex gap-1">
+                    {[0, 1, 2, 3, 4].map(i => (
+                      <div
+                        key={i}
+                        className="h-1 flex-1 rounded-full transition-all duration-300"
+                        style={{
+                          backgroundColor: i < pwStrength.score ? pwStrength.color : 'rgba(255,255,255,0.08)',
+                        }}
+                      />
+                    ))}
+                  </div>
+                  <span className="text-xs font-medium w-20 text-right" style={{ color: pwStrength.color }}>
+                    {pwStrength.label}
+                  </span>
+                </div>
+              )}
             </div>
 
             <div className="relative">
-              <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+              <Lock className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-ink-300" />
               <input
                 type={showPassword ? 'text' : 'password'}
                 autoComplete="new-password"
@@ -619,39 +688,33 @@ export function AuthFlow() {
                 onChange={e => setConfirmPassword(e.target.value)}
                 placeholder="Confirm password"
                 aria-label="Confirm password"
-                className={inputClass}
+                className={cn(inputClass, showPassword ? '' : 'pr-12')}
                 disabled={loading}
                 onKeyDown={e => { if (e.key === 'Enter') handleEmailSignUp(); }}
               />
+              {!showPassword && confirmPassword.length > 0 && (
+                <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                  {confirmPassword === password ? (
+                    <Check className="w-5 h-5 text-success-500" />
+                  ) : (
+                    <AlertCircle className="w-5 h-5 text-error-400" />
+                  )}
+                </div>
+              )}
             </div>
 
             <ErrorBanner error={error} />
             <InfoBanner info={info} />
 
-            <button
-              onClick={handleEmailSignUp}
-              disabled={loading || !email || !password || !confirmPassword}
-              className="w-full flex items-center justify-center gap-2 py-4 rounded-xl font-semibold text-white text-sm transition-all active:scale-95 shadow-lg disabled:opacity-60"
-              style={{ background: 'linear-gradient(135deg, #0ea5e9 0%, #14b8a6 100%)', boxShadow: '0 8px 24px -8px rgba(14, 165, 233, 0.6)' }}
-            >
-              {loading ? (
-                <>
-                  <Spinner size={20} />
-                  <span>Creating account...</span>
-                </>
-              ) : (
-                <>
-                  Create Account
-                  <ChevronRight className="w-5 h-5" />
-                </>
-              )}
-            </button>
+            <AccentButton onClick={handleEmailSignUp} disabled={loading || !email || !password || !confirmPassword}>
+              Create Account
+            </AccentButton>
 
-            <p className="text-sm text-slate-500 text-center pt-2">
+            <p className="text-sm text-ink-400 text-center pt-2">
               Already have an account?{' '}
               <button
                 onClick={() => { setError(''); setPassword(''); setConfirmPassword(''); setInfo(''); setAuthStage('email_password'); }}
-                className="text-sky-400 hover:text-sky-300 font-medium"
+                className="text-violet-400 hover:text-violet-300 font-medium"
               >
                 Sign in
               </button>
@@ -670,16 +733,20 @@ export function AuthFlow() {
         <div className="relative w-full max-w-sm flex flex-col items-center py-8 animate-fade-in-up">
           <BackButton onClick={() => { setError(''); setInfo(''); setAuthStage('email_password'); }} />
 
-          <h1 className="font-display text-2xl font-bold text-white mb-2 text-center">
+          <div className="mb-6">
+            <Logo size="small" />
+          </div>
+
+          <h1 className="font-display text-2xl font-bold text-ink-50 mb-2 text-center">
             Reset Password
           </h1>
-          <p className="text-sm text-slate-400 text-center mb-8 leading-relaxed">
+          <p className="text-sm text-ink-300 text-center mb-8 leading-relaxed">
             Enter your email and we'll send you a link to reset your password.
           </p>
 
           <div className="w-full space-y-4">
             <div className="relative">
-              <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
+              <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-ink-300" />
               <input
                 type="email"
                 inputMode="email"
@@ -697,28 +764,13 @@ export function AuthFlow() {
             <ErrorBanner error={error} />
             <InfoBanner info={info} />
 
-            <button
-              onClick={handleForgotPassword}
-              disabled={loading || !email}
-              className="w-full flex items-center justify-center gap-2 py-4 rounded-xl font-semibold text-white text-sm transition-all active:scale-95 shadow-lg disabled:opacity-60"
-              style={{ background: 'linear-gradient(135deg, #0ea5e9 0%, #14b8a6 100%)', boxShadow: '0 8px 24px -8px rgba(14, 165, 233, 0.6)' }}
-            >
-              {loading ? (
-                <>
-                  <Spinner size={20} />
-                  <span>Sending...</span>
-                </>
-              ) : (
-                <>
-                  Send Reset Link
-                  <ChevronRight className="w-5 h-5" />
-                </>
-              )}
-            </button>
+            <AccentButton onClick={handleForgotPassword} disabled={loading || !email}>
+              Send Reset Link
+            </AccentButton>
 
             <button
               onClick={() => { setError(''); setInfo(''); setAuthStage('email_password'); }}
-              className="w-full text-sm text-slate-400 hover:text-sky-400 transition-colors text-center pt-2"
+              className="w-full text-sm text-ink-300 hover:text-violet-400 transition-colors text-center pt-2"
             >
               Back to Sign In
             </button>
@@ -728,13 +780,13 @@ export function AuthFlow() {
     );
   }
 
-  // ---- Profile setup ----
+  // ---- Profile setup — Telegram-style with floating labels and avatar ----
   if (authStage === 'profile') {
     return (
       <div className="min-h-screen relative flex flex-col px-6 safe-top safe-bottom overflow-y-auto">
         <AuthBackground />
         <div className="relative w-full max-w-sm mx-auto flex flex-col py-8 animate-fade-in-up">
-          <div className="flex justify-between items-center mb-6">
+          <div className="flex justify-between items-center mb-8">
             <button
               onClick={() => {
                 signOut();
@@ -745,7 +797,7 @@ export function AuthFlow() {
                 setError('');
                 setUsernameStatus('idle');
               }}
-              className="w-10 h-10 rounded-xl bg-white/[0.06] border border-white/10 flex items-center justify-center text-slate-300 hover:bg-white/10 transition-colors"
+              className="w-10 h-10 rounded-xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center text-ink-200 hover:bg-white/10 transition-colors"
             >
               <ArrowLeft className="w-5 h-5" />
             </button>
@@ -753,11 +805,11 @@ export function AuthFlow() {
             <div className="w-10" />
           </div>
 
-          <h1 className="font-display text-2xl font-bold text-white mb-1 text-center">
-            Create your profile
+          <h1 className="font-display text-2xl font-bold text-ink-50 mb-1 text-center">
+            Set up your profile
           </h1>
-          <p className="text-sm text-slate-400 text-center mb-8">
-            Tell the Ess Gram community who you are.
+          <p className="text-sm text-ink-300 text-center mb-8">
+            Tell the Ess Gram community who you are
           </p>
 
           {/* Photo upload */}
@@ -774,15 +826,15 @@ export function AuthFlow() {
               className="relative group"
             >
               {photoUrl ? (
-                <div className="w-24 h-24 rounded-full overflow-hidden ring-2 ring-sky-500 ring-offset-4 ring-offset-slate-900">
+                <div className="w-28 h-28 rounded-full overflow-hidden ring-2 ring-violet-500 ring-offset-4 ring-offset-ink-950">
                   <img src={photoUrl} alt="Profile" className="w-full h-full object-cover" />
                 </div>
               ) : (
-                <div className="w-24 h-24 rounded-full bg-white/[0.06] border border-white/10 flex items-center justify-center group-hover:border-sky-400/50 transition-colors">
-                  <Camera className="w-8 h-8 text-slate-400" />
+                <div className="w-28 h-28 rounded-full bg-white/[0.04] border-2 border-dashed border-white/15 flex items-center justify-center group-hover:border-violet-400/50 transition-colors">
+                  <Camera className="w-10 h-10 text-ink-300" />
                 </div>
               )}
-              <div className="absolute bottom-0 right-0 w-8 h-8 rounded-full flex items-center justify-center border-2 border-slate-900" style={{ background: 'linear-gradient(135deg, #0ea5e9 0%, #14b8a6 100%)' }}>
+              <div className="absolute bottom-1 right-1 w-9 h-9 rounded-full flex items-center justify-center border-2 border-ink-950" style={{ background: 'linear-gradient(135deg, #7c5cff 0%, #ff4784 100%)' }}>
                 <Camera className="w-4 h-4 text-white" />
               </div>
             </button>
@@ -790,81 +842,82 @@ export function AuthFlow() {
 
           <div className="space-y-4">
             <div>
-              <label className="text-xs font-medium text-slate-400 mb-1.5 block">Full Name</label>
+              <label className="text-xs font-medium text-ink-300 mb-1.5 flex items-center gap-1.5">
+                <UserIcon className="w-3.5 h-3.5" /> Full Name
+              </label>
               <input
                 value={fullName}
                 onChange={e => setFullName(e.target.value)}
                 placeholder="Alex Rivera"
-                className="w-full px-4 py-3.5 rounded-xl bg-white/[0.06] border border-white/10 text-white placeholder:text-slate-500 outline-none transition-all focus:border-sky-400/50 focus:bg-white/[0.08]"
+                className={cn(inputClass, 'pl-4')}
               />
             </div>
 
             <div>
-              <label className="text-xs font-medium text-slate-400 mb-1.5 block">Username</label>
+              <label className="text-xs font-medium text-ink-300 mb-1.5 flex items-center gap-1.5">
+                <AtSign className="w-3.5 h-3.5" /> Username
+              </label>
               <div className="relative">
-                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-medium">@</span>
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-ink-300 font-medium">@</span>
                 <input
                   value={username}
                   onChange={e => setUsername(sanitizeUsername(e.target.value))}
                   placeholder="alexrivera"
                   className={cn(
-                    'w-full pl-8 pr-10 py-3.5 rounded-xl bg-white/[0.06] border text-white placeholder:text-slate-500 outline-none transition-all focus:bg-white/[0.08]',
+                    'w-full pl-8 pr-10 py-4 text-base rounded-2xl bg-white/[0.04] border text-ink-50 placeholder:text-ink-300 outline-none transition-all focus:bg-white/[0.06]',
                     usernameStatus === 'available'
-                      ? 'border-emerald-500/40 focus:border-emerald-400/60'
+                      ? 'border-success-500/40 focus:border-success-400/60'
                       : usernameStatus === 'taken'
-                      ? 'border-red-500/40 focus:border-red-400/60'
-                      : 'border-white/10 focus:border-sky-400/50'
+                      ? 'border-error-500/40 focus:border-error-400/60'
+                      : 'border-white/[0.08] focus:border-violet-400/50'
                   )}
                 />
                 {usernameStatus === 'checking' && (
-                  <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 animate-spin" />
+                  <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-ink-300 animate-spin" />
                 )}
                 {usernameStatus === 'available' && (
-                  <Check className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-emerald-400" />
+                  <Check className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-success-500" />
                 )}
                 {usernameStatus === 'taken' && (
-                  <AlertCircle className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-red-400" />
+                  <AlertCircle className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-error-400" />
                 )}
               </div>
               {username && !isValidUsername(username) && (
-                <p className="text-xs text-slate-500 mt-1">3-20 characters: lowercase letters, numbers, underscores</p>
+                <p className="text-xs text-ink-400 mt-1">3-20 characters: lowercase letters, numbers, underscores</p>
               )}
               {usernameStatus === 'available' && (
-                <p className="text-xs text-emerald-400 mt-1">Username available</p>
+                <p className="text-xs text-success-500 mt-1">Username available</p>
               )}
               {usernameStatus === 'taken' && (
-                <p className="text-xs text-red-400 mt-1">Username already taken</p>
+                <p className="text-xs text-error-400 mt-1">Username already taken</p>
               )}
             </div>
 
             <div>
-              <label className="text-xs font-medium text-slate-400 mb-1.5 block">Bio (optional)</label>
+              <label className="text-xs font-medium text-ink-300 mb-1.5 block">Bio (optional)</label>
               <textarea
                 value={bio}
                 onChange={e => setBio(e.target.value)}
                 placeholder="Designer & coffee enthusiast"
                 rows={2}
                 maxLength={120}
-                className="w-full px-4 py-3.5 rounded-xl bg-white/[0.06] border border-white/10 text-white placeholder:text-slate-500 outline-none transition-all focus:border-sky-400/50 focus:bg-white/[0.08] resize-none"
+                className="w-full px-4 py-3.5 rounded-2xl bg-white/[0.04] border border-white/[0.08] text-ink-50 placeholder:text-ink-300 outline-none transition-all focus:border-violet-400/50 focus:bg-white/[0.06] resize-none"
               />
-              <p className="text-2xs text-slate-500 mt-1 text-right">{bio.length}/120</p>
+              <p className="text-2xs text-ink-400 mt-1 text-right">{bio.length}/120</p>
             </div>
 
             {error && <ErrorBanner error={error} />}
 
-            <button
-              onClick={handleProfileSubmit}
-              disabled={loading || !fullName.trim() || !isValidUsername(username) || usernameStatus !== 'available'}
-              className="w-full flex items-center justify-center gap-2 py-4 rounded-xl font-semibold text-white text-sm transition-all active:scale-95 shadow-lg mt-2 disabled:opacity-60"
-              style={{ background: 'linear-gradient(135deg, #0ea5e9 0%, #14b8a6 100%)', boxShadow: '0 8px 24px -8px rgba(14, 165, 233, 0.6)' }}
-            >
-              {loading ? <Spinner size={20} /> : (
-                <>
-                  Create Account
-                  <ChevronRight className="w-5 h-5" />
-                </>
-              )}
-            </button>
+            <div className="pt-2">
+              <AccentButton onClick={handleProfileSubmit} disabled={loading || !fullName.trim() || !isValidUsername(username) || usernameStatus !== 'available'}>
+                {loading ? <Spinner size={20} /> : (
+                  <>
+                    <Sparkles className="w-5 h-5" />
+                    Complete Setup
+                  </>
+                )}
+              </AccentButton>
+            </div>
           </div>
         </div>
       </div>
